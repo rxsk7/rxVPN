@@ -3664,11 +3664,11 @@ async fn tg_open(st: State<'_, AppState>) -> Res<()> {
     if link.is_empty() {
         return Err(trs!("Сначала включи «Telegram без VPN»").into());
     }
-    if winsys::is_admin() {
-        // Ссылку не открываем (см. open_tg_link) — кладём в буфер обмена.
+    // Открываем сами (от администратора — через Проводник пользователя, см. open_tg_link).
+    // Не вышло — ссылка в буфере обмена, окно подскажет вставить её в Telegram.
+    winsys::open_tg_link(&link).inspect_err(|_| {
         let _ = arboard::Clipboard::new().and_then(|mut c| c.set_text(link.clone()));
-    }
-    winsys::open_tg_link(&link)
+    })
 }
 
 #[tauri::command]

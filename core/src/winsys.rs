@@ -132,14 +132,87 @@ pub fn confirm_box(title: &str, text: &str) -> bool {
 
 /// Открыть ссылку tg:// в Telegram Desktop (кто зарегистрирован в системе).
 /// Только наши ссылки на локальный прокси — ничего чужого так не откроем.
+/// Кто держит рабочий стол: None — не Проводник из папки Windows (или его нет);
+/// Some(false) — Проводник без прав администратора; Some(true) — Проводник сам с правами
+/// (UAC выключен или так настроено: тогда любая программа пользователя и так от администратора).
+#[cfg(windows)]
+fn shell_elevated() -> Option<bool> {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId};
+    unsafe {
+        let hwnd = GetShellWindow();
+        if hwnd.is_null() {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == 0 {
+            return None;
+        }
+        let proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if proc.is_null() {
+            return None;
+        }
+        // Это действительно Проводник из папки Windows, а не чужая оболочка.
+        let mut buf = [0u16; 520];
+        let mut len = buf.len() as u32;
+        let image_ok = QueryFullProcessImageNameW(proc, 0, buf.as_mut_ptr(), &mut len) != 0
+            && windows_exe("explorer.exe").is_some_and(|e| {
+                String::from_utf16_lossy(&buf[..len as usize]).eq_ignore_ascii_case(&e.to_string_lossy())
+            });
+        let mut token: HANDLE = std::ptr::null_mut();
+        let mut out = None;
+        if image_ok && OpenProcessToken(proc, TOKEN_QUERY, &mut token) != 0 {
+            let mut el = TOKEN_ELEVATION { TokenIsElevated: 1 };
+            let mut ret = 0u32;
+            if GetTokenInformation(token, TokenElevation, &mut el as *mut _ as *mut _, std::mem::size_of::<TOKEN_ELEVATION>() as u32, &mut ret) != 0 {
+                out = Some(el.TokenIsElevated != 0);
+            }
+            CloseHandle(token);
+        }
+        CloseHandle(proc);
+        out
+    }
+}
+
 pub fn open_tg_link(url: &str) -> Result<(), String> {
-    if !url.starts_with("tg://proxy?server=127.0.0.1&port=") || url.chars().any(|c| c.is_whitespace() || c == '"') {
+    // Только наша ссылка на локальный прокси и только простые символы: Проводник ниже получает
+    // её аргументом — ни кавычек, ни пробелов, ни запятых (у explorer.exe это разделители ключей).
+    if !url.starts_with("tg://proxy?server=127.0.0.1&port=")
+        || !url.bytes().all(|b| b.is_ascii_alphanumeric() || b"/:?=&.%_-".contains(&b))
+    {
         return Err(trs!("не та ссылка").into());
     }
-    // От администратора не открываем: обработчик tg:// Windows берёт и из HKCU\Software\Classes,
-    // куда пишет любая программа пользователя, — она запустилась бы с правами администратора без окна UAC.
+    // От администратора сами не открываем: обработчик tg:// Windows берёт и из HKCU\Software\Classes,
+    // куда пишет любая программа пользователя, — она запустилась бы с правами администратора.
+    // Отдаём ссылку Проводнику: новый explorer.exe передаёт её уже запущенному Проводнику
+    // пользователя и закрывается — Telegram открывается без прав администратора, как от клика.
     if is_admin() {
-        return Err(trs!("rxvpn запущен от администратора — ссылку не открываю (так запустилась бы чужая программа с правами админа). Ссылка скопирована: вставь её в Telegram").into());
+        #[cfg(windows)]
+        {
+            match shell_elevated() {
+                // Нет Проводника (другая оболочка, упал) — новый explorer.exe открыл бы ссылку
+                // с нашими правами. Не открываем.
+                None => {
+                    return Err(trs!("Проводник Windows не запущен — ссылку не открываю (она открылась бы с правами администратора). Ссылка скопирована: вставь её в Telegram").into());
+                }
+                // Проводник без прав: отдаём ему — Telegram откроется без прав администратора.
+                Some(false) => {
+                    let explorer = windows_exe("explorer.exe").ok_or(trs!("не нашёл папку Windows"))?;
+                    let mut c = std::process::Command::new(explorer);
+                    c.arg(url);
+                    crate::runner::clean_env(&mut c);
+                    return c.spawn().map(|_| ()).map_err(|e| tr!("не открылось: {e}"));
+                }
+                // Проводник сам с правами администратора: у пользователя всё и так от админа —
+                // открыть напрямую ничего не повышает (ниже, как без прав).
+                Some(true) => {}
+            }
+        }
     }
     #[cfg(windows)]
     {
@@ -573,6 +646,22 @@ pub fn windows_version() -> String {
 
 #[cfg(test)]
 mod path_tests {
+    /// Живой (Windows с рабочим столом): обычный Проводник — без прав администратора.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn shell_found_live() {
+        assert!(super::shell_elevated().is_some(), "рабочий стол держит Проводник из папки Windows");
+    }
+
+    #[test]
+    fn tg_link_rules() {
+        // Чужое и опасное для Проводника — отказ ещё до запуска чего-либо.
+        for bad in ["https://evil.example", "tg://proxy?server=1.2.3.4&port=1", "tg://proxy?server=127.0.0.1&port=1,/select", "tg://proxy?server=127.0.0.1&port=1 x", "tg://proxy?server=127.0.0.1&port=1\"&x"] {
+            assert!(super::open_tg_link(bad).is_err(), "{bad}");
+        }
+    }
+
     #[test]
     fn inside() {
         use std::path::Path;

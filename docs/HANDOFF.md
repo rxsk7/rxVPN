@@ -35,7 +35,7 @@ static.rust-lang.org закрыт — `rustup target add x86_64-pc-windows-gnu` 
 ## Сделано
 - 0.12.0 — аудит перед публикацией:
   - `src-tauri/build.rs`: релиз без RXVPN_UPDATE_REPO/RXVPN_UPDATE_PUBKEY падает (обход — RXVPN_ALLOW_NO_UPDATES=1).
-    Сборка 0.12.0: репозиторий `rxmv/rxvpn`, публичный ключ f5df55b7…88b8; приватный — у владельца, НЕ в репозитории.
+    Сборка 0.14.2+: репозиторий `rxsk7/rxVPN` (0.12–0.14.1 собраны с несуществующим `rxmv/rxvpn` — у них обновления не найдутся), публичный ключ f5df55b7…88b8; приватный — у владельца, НЕ в репозитории.
   - `webview_dir`: копия с правами — профиль WebView2 в `%ProgramFiles%\rxvpn\webview`.
   - `core/src/guard.rs`: снимок охраняемых настроек в `%ProgramFiles%\rxvpn\settings-guard.json`, пишется в `persist`
     копией с правами; при старте с правами — `guard_settings` (MessageBox, по умолчанию «Нет» → revert).

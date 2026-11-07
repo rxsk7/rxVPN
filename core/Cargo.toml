@@ -1,6 +1,6 @@
 [package]
 name = "rxvpn-core"
-version = "0.14.0"
+version = "0.14.2"
 edition = "2021"
 build = "build.rs"
 description = "Ядро rxvpn: парсинг ссылок, конфиг Xray, запуск, системный прокси"

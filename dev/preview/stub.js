@@ -37,7 +37,7 @@
     get_view: () => view,
     get_log: () => log,
     take_startup_action: () => null,
-    connect: () => { view.connected = true; view.active_id = view.selected; return view; },
+    connect: () => new Promise((r) => setTimeout(() => { view.connected = true; view.active_id = view.selected; r(view); }, 4000)), // как настоящий: несколько секунд
     disconnect: () => { view.connected = false; return view; },
     update_check: () => ({ configured: true, current: "0.12.0", version: null, notes: null }),
   };
@@ -46,7 +46,7 @@
       invoke: async (cmd, args) => {
         console.debug("invoke", cmd, args);
         const f = answers[cmd];
-        if (f) return structuredClone(f(args));
+        if (f) return structuredClone(await f(args));
         return null;
       },
     },

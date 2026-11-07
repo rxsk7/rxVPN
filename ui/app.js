@@ -142,7 +142,7 @@ function showPage(p) {
   if (p === "home") {
     document.querySelector('#tabs button[data-page="home"]').classList.remove("alert");
     const lg = $("log");
-    lg.scrollTop = lg.scrollHeight; // пока главная была скрыта, прокрутка не двигалась
+    lg.scrollTop = 0; // новые строки — сверху
   }
   store("page", p);
 }
@@ -283,7 +283,27 @@ function fmtClock(ms) {
   const p2 = (n) => String(n).padStart(2, "0");
   return `${p2(Math.floor(s / 3600))}:${p2(Math.floor((s % 3600) / 60))}:${p2(s % 60)}`;
 }
+// GIF с лавиной — только пока идёт подключение (то же `busy`, что красит кнопку): при каждом
+// новом подключении — с первого кадра, после — выгружаем, чтобы не крутился зря.
+const K2_GIF = "img/avalanche-k2.gif";
+let gifShown = false;
+let connecting = false; // нажали «Подключить» и ждём ответа (busy бывает и при отключении)
+function renderAvalanche() {
+  const want = busy && connecting && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  $("btn-connect").classList.toggle("connecting", want);
+  if (want === gifShown) return;
+  gifShown = want;
+  const img = document.querySelector("#btn-connect .k2-anim");
+  if (want) {
+    img.removeAttribute("src");
+    img.src = K2_GIF;
+  } else {
+    setTimeout(() => { if (!gifShown) img.removeAttribute("src"); }, 400); // после плавного исчезновения
+  }
+}
+
 function renderHero() {
+  renderAvalanche();
   const on = isOn() && !busy;
   if (on && !connSince) connSince = Date.now();
   if (!isOn()) connSince = null;
@@ -529,11 +549,15 @@ async function tgSet(on, cf, msg) {
   } catch { await refresh(); }
   render();
 }
-$("chk-tg").onchange = (e) => {
+$("chk-tg").onchange = async (e) => {
   const on = e.target.checked;
-  tgSet(on, !!V.settings.tg_cf, on
-    ? t("Готово. Теперь «Подключить Telegram Desktop» — и в Telegram «Подключить прокси»")
+  await tgSet(on, !!V.settings.tg_cf, on ? null
     : t("Выключено. В Telegram выключи прокси: Настройки → Продвинутые → Тип соединения"));
+  // Как на главной: в первый раз rxvpn сам открывает Telegram с «Подключить прокси».
+  if (on && V.tg && V.tg.running) {
+    if (load("tg-linked") === "1") toast(t("Telegram без VPN включён"));
+    else await tgOpen();
+  }
 };
 $("chk-tg-cf").onchange = (e) => tgSet(true, e.target.checked, e.target.checked
   ? t("Если веб-вход не ответит — через Cloudflare-домены сообщества tg-ws-proxy")
@@ -952,12 +976,13 @@ $("btn-connect").onclick = async () => {
     toast(t("Сначала подбери стратегию zapret"));
     return openZapret();
   }
+  connecting = !isOn(); // лавина — только при подключении, не при отключении
   setBusy(true);
   $("real-res").textContent = "";
   adminKind = V.settings.zapret ? "zapret" : V.settings.zapret_hybrid ? "hybrid" : "tun";
   try { V = await call(isOn() ? "disconnect" : "connect"); }
   catch { await refresh(); }
-  finally { setBusy(false); }
+  finally { connecting = false; setBusy(false); }
 };
 
 async function saveSettingsPatch(patch, okMsg) {
@@ -2053,19 +2078,22 @@ const logEl = $("log");
 const MAX_LOG = 500;
 function addLog(line) {
   const err = /error|failed|rejected|did not connect|не прошла|не подключился/i.test(line); // i18n-skip — лог на любом языке
-  // Читаешь старое — не дёргаем вниз; внизу — едем за новыми строками.
-  const stick = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+  // Новые строки — сверху. Читаешь старое ниже — новая строка не сдвигает то, что читаешь.
+  const top = logEl.scrollTop < 40;
+  const before = logEl.scrollHeight;
   const d = el("div", err ? "err" : line.startsWith("[rxvpn]") ? "me" : "", line);
-  logEl.append(d);
-  while (logEl.childElementCount > MAX_LOG) logEl.firstChild.remove();
-  if (stick || page !== "home") logEl.scrollTop = logEl.scrollHeight;
+  logEl.prepend(d);
+  while (logEl.childElementCount > MAX_LOG) logEl.lastChild.remove();
+  if (top || page !== "home") logEl.scrollTop = 0;
+  else logEl.scrollTop += logEl.scrollHeight - before;
   // Ошибка, пока смотришь другую вкладку, — красная точка на «Главной» (лог там).
   if (err && page !== "home") document.querySelector('#tabs button[data-page="home"]').classList.add("alert");
 }
 $("btn-log-clear").onclick = () => logEl.replaceChildren();
 $("btn-log-copy").onclick = async () => {
   try {
-    await navigator.clipboard.writeText([...logEl.children].map((d) => d.textContent).join("\n"));
+    // На экране новые сверху, в буфер — по порядку времени (так лог читают и присылают).
+    await navigator.clipboard.writeText([...logEl.children].reverse().map((d) => d.textContent).join("\n"));
     toast(t("Лог скопирован. В нём адреса серверов — в открытые чаты не выкладывай"));
   } catch { toast(t("Не скопировалось — выдели текст мышкой"), true); }
 };

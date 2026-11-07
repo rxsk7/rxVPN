@@ -106,8 +106,12 @@ pub async fn check(proxy: Option<&str>, current: &str) -> Result<Option<Manifest
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
-        .and_then(|r| r.error_for_status())
         .map_err(|e| tr!("GitHub недоступен: {}", crate::net::explain(&e)))?;
+    // 404 — в репозитории ещё нет ни одного релиза (или он пока не создан): обновлений просто нет.
+    if r.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let r = r.error_for_status().map_err(|e| tr!("GitHub недоступен: {}", crate::net::explain(&e)))?;
     let rel: serde_json::Value = serde_json::from_slice(&crate::net::read_capped(r, 1 << 20).await?).map_err(|_| trs!("GitHub ответил не JSON").to_string())?;
     let url = rel["assets"]
         .as_array()

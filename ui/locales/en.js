@@ -241,7 +241,6 @@ window.RX_EN = {
  "Готовлю движок…": "Preparing the engine…",
  "Готовлю…": "Preparing…",
  "Готово": "Done",
- "Готово. Теперь «Подключить Telegram Desktop» — и в Telegram «Подключить прокси»": "Done. Now “Connect Telegram Desktop” — and in Telegram “Connect proxy”",
  "Готово: Windows спрашивает DNS у rxvpn, rxvpn — по HTTPS": "Done: Windows asks rxvpn for DNS, rxvpn asks over HTTPS",
  "Готово: сервер «WARP · …» в папке «WARP». Выбери его или поставь в «Сайт → свой сервер»": "Done: server “WARP · …” in the “WARP” folder. Select it or use it in “Site → own server”",
  "Дальше": "Next",
