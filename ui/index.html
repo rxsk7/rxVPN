@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>rxvpn</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="theme.css" />
 </head>
 <body>
   <header class="top">
@@ -40,11 +41,53 @@
   <main class="pages">
     <!-- Главная: кнопка, сервер, режим — и всё -->
     <section class="page active" data-page="home">
+      <!-- Первый запуск: серверов нет — три шага вместо пустого экрана -->
+      <div class="welcome hidden" id="welcome">
+        <div class="wel-hero">
+          <svg class="wel-logo" viewBox="0 0 1024 1024" aria-hidden="true">
+            <g clip-path="url(#lg-sq)">
+              <rect width="1024" height="1024" fill="url(#lg-bg)"/>
+              <path fill="#fff" d="M0 1024V812l120-72 90-80 70-60 50-80 42-50 28-60 40-50 30-60 42-70 42 60 26 40 38 30 48 12 40 48 42 80 58 70 80 80 144 110V1024z"/>
+              <path fill="url(#lg-sh)" d="M512 230l42 60 26 40 38 30 48 12 40 48 42 80 58 70 80 80 144 110V1024H648l-28-170 10-150-46-170-28-150z"/>
+            </g>
+          </svg>
+          <h1>Добро пожаловать в rxvpn</h1>
+          <p>VPN, который сам обходит блокировки. Три шага — и готово.</p>
+        </div>
+        <ol class="wel-steps">
+          <li class="wel-step" id="wel-step-core">
+            <span class="wel-num">1</span>
+            <span class="cr-text"><b>Ядро Xray</b><span class="nav-meta" id="wel-core-meta">движок VPN, ~30 МБ с GitHub</span></span>
+            <button class="primary small" id="wel-core">Скачать</button>
+          </li>
+          <li class="wel-step" id="wel-step-add">
+            <span class="wel-num">2</span>
+            <span class="cr-text"><b>Добавь сервер</b><span class="nav-meta">ссылка vless:// и другие или подписка от VPN-сервиса</span></span>
+            <span class="wel-btns">
+              <button class="primary small" id="wel-paste">Вставить из буфера</button>
+              <button class="ghost small" id="wel-type">Ввести</button>
+            </span>
+          </li>
+          <li class="wel-step wel-dim">
+            <span class="wel-num">3</span>
+            <span class="cr-text"><b>Подключись</b><span class="nav-meta">одна большая кнопка на главной</span></span>
+          </li>
+        </ol>
+        <div class="wel-alt">
+          <button class="ghost small" id="wel-vps">Есть свой VPS? Поставлю VPN на него сам</button>
+          <button class="ghost small" id="wel-zapret">Нужен только YouTube и Discord — без VPN</button>
+        </div>
+      </div>
+
       <div class="home">
-        <button class="power" id="btn-connect" aria-label="Подключить">
-          <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
-        </button>
-        <div class="power-label" id="power-label">Подключить</div>
+       <div class="home-main">
+        <div class="power-wrap">
+          <button class="power" id="btn-connect" aria-label="Подключить">
+            <svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
+          </button>
+        </div>
+        <div class="power-label" id="power-label">Не подключено</div>
+        <div class="hero-sub" id="hero-sub">Нажми кнопку, чтобы подключиться</div>
 
         <button class="card-row" id="btn-current">
           <span class="cr-text">
@@ -53,6 +96,24 @@
           </span>
           <span class="chev">›</span>
         </button>
+
+        <!-- Проверки — на виду, каждая открывается окном поверх -->
+        <div class="health ok" id="health"><span id="health-text">Всё в порядке</span><button type="button" class="ghost small hidden" id="health-btn"></button></div>
+       </div>
+
+       <div class="home-side">
+        <div class="speed idle" id="speed">
+          <div class="speed-head">
+            <span class="label">Скорость</span>
+            <span class="speed-idle-note">появится после подключения</span>
+          </div>
+          <div class="speed-nums">
+            <div><span class="arrow down">↓</span><span class="sp" id="sp-down">0 Б/с</span></div>
+            <div><span class="arrow up">↑</span><span class="sp" id="sp-up">0 Б/с</span></div>
+          </div>
+          <canvas id="spark" width="560" height="96"></canvas>
+          <div class="speed-total" id="sp-total">За сессию: —</div>
+        </div>
 
         <div class="mode-block">
           <div class="seg seg-mode3" id="seg-mode">
@@ -84,9 +145,6 @@
           <input type="checkbox" id="chk-tg-home" aria-label="Telegram без VPN" title="Telegram Desktop — через веб-вход, без VPN" />
         </div>
 
-        <!-- Проверки — на виду, каждая открывается окном поверх -->
-        <div class="health ok" id="health"><span id="health-text">Всё в порядке</span><button type="button" class="ghost small hidden" id="health-btn"></button></div>
-
         <div class="chips home-tools" id="home-tools">
           <button type="button" id="ht-diag" title="Что провайдер сделал с сайтом и что включить">Сайт не открывается?</button>
           <button type="button" id="ht-ip" title="С какого IP тебя видят сайты, утечки DNS и IPv6">Мой IP и утечки</button>
@@ -94,27 +152,19 @@
           <button type="button" id="ht-svc" title="Страна сервера и работают ли ChatGPT, Gemini, YouTube Premium, Netflix">Сервисы</button>
           <button type="button" id="ht-tweak" title="Сервер не подключается? Подберу обход блокировки">Обход</button>
         </div>
-
-        <div class="speed idle" id="speed">
-          <div class="speed-nums">
-            <div><span class="arrow down">↓</span><span class="sp" id="sp-down">0 Б/с</span></div>
-            <div><span class="arrow up">↑</span><span class="sp" id="sp-up">0 Б/с</span></div>
-          </div>
-          <canvas id="spark" width="560" height="96"></canvas>
-          <div class="speed-total" id="sp-total">За сессию: —</div>
-        </div>
+       </div>
       </div>
 
-      <!-- Лог: что делают rxvpn, Xray и zapret -->
-      <section class="home-log log" id="log-box">
-        <div class="log-head">
+      <!-- Лог: что делают rxvpn, Xray и zapret. Свёрнут — нужен, когда что-то не так -->
+      <details class="home-log log" id="log-box">
+        <summary class="log-head">
           <span class="log-title">Лог</span>
           <span class="log-hint">красное — ошибки</span>
           <button class="ghost small" id="btn-log-copy">Копировать</button>
           <button class="ghost small" id="btn-log-clear">Очистить</button>
-        </div>
+        </summary>
         <pre id="log"></pre>
-      </section>
+      </details>
     </section>
 
     <!-- Сервера -->
@@ -197,6 +247,16 @@
     <!-- Обход: без VPN (zapret, Telegram) и анонимность (Tor, WARP) -->
     <section class="page" data-page="bypass">
       <div class="page-inner">
+        <div class="group">
+          <h3 class="sec">Что не работает?</h3>
+          <div class="scen-grid">
+            <button class="scen" data-scen="zapret-field"><span class="scen-ico">▶</span><b>YouTube и Discord тормозят</b><span>zapret мимо VPN — быстро и без трафика</span></button>
+            <button class="scen" data-scen="tg-field"><span class="scen-ico">✈</span><b>Telegram не грузится</b><span>через веб-вход, без VPN</span></button>
+            <button class="scen" data-scen="diag"><span class="scen-ico">?</span><b>Сайт не открывается</b><span>проверю за 10 секунд и скажу, что включить</span></button>
+            <button class="scen" data-scen="doh-field"><span class="scen-ico">⇄</span><b>Вместо сайта — заглушка</b><span>DNS без подмены провайдером</span></button>
+          </div>
+        </div>
+
         <div class="group" id="zapret-field">
           <h3 class="sec">Через zapret, мимо VPN</h3>
           <div class="nav-list">
@@ -253,6 +313,8 @@
       <div class="page-inner">
         <div class="whatsnew" id="whatsnew">
           <div class="wn-head"><b>Что нового в 0.10–0.12</b><button class="ghost small" id="btn-wn-hide">Скрыть</button></div>
+          <button class="wn-row" data-go="home"><span>0.12.1: новый дизайн — главная-дашборд, первый запуск в 3 шага</span><span class="nav-meta">Главная ›</span></button>
+          <button class="wn-row" data-go="bypass"><span>0.12.1: «Что не работает?» — обход по ситуации</span><span class="nav-meta">Обход ›</span></button>
           <button class="wn-row" data-go="more:btn-settings"><span>0.12: настройки на весь комп сверяются, окно с правами — со своим профилем</span><span class="nav-meta">Ещё → Настройки ›</span></button>
           <button class="wn-row" data-go="more:btn-settings"><span>0.12: новым — случайные порты прокси и шифрование серверов</span><span class="nav-meta">Ещё → Настройки ›</span></button>
           <button class="wn-row" data-go="more:btn-settings"><span>Защита от вирусов: права администратора — только у копии в Program Files</span><span class="nav-meta">Ещё → Настройки ›</span></button>

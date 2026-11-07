@@ -1,0 +1,66 @@
+// Заглушка window.__TAURI__ для превью окна в браузере (dev/preview/serve.py).
+// Состояние — из ?state=empty|off|on (по умолчанию off). В сборку не попадает.
+(() => {
+  const q = new URLSearchParams(location.search);
+  const mode = q.get("state") || "off";
+  const settings = window.__RX_SETTINGS;
+  const srv = (id, name, summary, sub, group, mbps, stab) => ({
+    id, name, summary, address: "203.0.113." + id.length, port: 443, sub_id: sub, group,
+    stab: stab == null ? null : { pct: stab, weak: false, n: 40 }, mbps, hidden: null,
+  });
+  const servers = mode === "empty" ? [] : [
+    srv("a1", "🇳🇱 Нидерланды", "VLESS · Reality · nl1.example.com", "s1", null, 184.2, 99),
+    srv("a2", "🇩🇪 Германия", "VLESS · xHTTP · de.example.com", "s1", null, 96.4, 97),
+    srv("a3", "🇫🇮 Финляндия", "Trojan · TLS · fi.example.com", "s1", null, 61.0, 88),
+    srv("a4", "🇺🇸 США", "Hysteria2 · us.example.com", "s1", null, null, null),
+    srv("b1", "Мой VPS", "VLESS · Reality · 198.51.100.7", null, "Свои", 240.5, 100),
+  ];
+  const on = mode === "on";
+  const view = {
+    servers, list_filter: { hide_dead: false, dedup: false }, lang: q.get("lang") || "ru",
+    subscriptions: mode === "empty" ? [] : [{ id: "s1", name: "Мой VPN-сервис", url: "https://example.com/sub", nodes: 4, updated: 0, usage: { upload: 1e9, download: 21e9, total: 100e9, expire: Date.now() / 1000 + 86400 * 23 } }],
+    settings, selected: mode === "empty" ? null : "a1", auto: false, connected: on, active_id: on ? "a1" : null,
+    active_name: on ? "🇳🇱 Нидерланды" : null, tun_active: false, is_admin: false, testing: false, speed_all: false,
+    lists: null, lists_busy: false, core_installed: mode !== "empty", core_dir: "C:\\rxvpn\\data\\core",
+    data_dir: "C:\\rxvpn\\data", portable: true, admin_ok: true, zapret_active: false, zapret_name: null,
+    zapret_testing: false,
+    tg: { running: false, port: 1443, link: "", active: 0, total: 0, web: 0, cloudflare: 0, direct: 0, failed: 0, last_error: "" },
+    doh: { running: false, label: "", queries: 0, cached: 0, failed: 0, last_error: "" },
+    vps: [], tor: null, wl_switched: false, health: [], hybrid_active: false, is_windows: true,
+  };
+  const handlers = {};
+  const log = [
+    "[rxvpn] запуск 0.12.0",
+    on ? "[rxvpn] подключено: 🇳🇱 Нидерланды (VLESS · Reality)" : "[rxvpn] отключено",
+  ];
+  const answers = {
+    get_view: () => view,
+    get_log: () => log,
+    take_startup_action: () => null,
+    connect: () => { view.connected = true; view.active_id = view.selected; return view; },
+    disconnect: () => { view.connected = false; return view; },
+    update_check: () => ({ configured: true, current: "0.12.0", version: null, notes: null }),
+  };
+  window.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        console.debug("invoke", cmd, args);
+        const f = answers[cmd];
+        if (f) return structuredClone(f(args));
+        return null;
+      },
+    },
+    event: {
+      listen: async (name, cb) => { (handlers[name] ||= []).push(cb); return () => {}; },
+    },
+  };
+  // Живой график скорости для состояния «on».
+  if (on) {
+    let t = 0;
+    setInterval(() => {
+      t++;
+      const down = Math.round(2.5e6 + Math.sin(t / 3) * 1.4e6 + Math.random() * 6e5);
+      for (const cb of handlers.stats || []) cb({ payload: { up_speed: Math.round(down / 9), down_speed: down, up_total: 31e6 + t * 3e5, down_total: 412e6 + t * down, ping: 42 } });
+    }, 1000);
+  }
+})();

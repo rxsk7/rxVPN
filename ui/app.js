@@ -169,7 +169,9 @@ function render() {
   p.classList.toggle("on", isOn() && !busy);
   p.classList.toggle("busy", busy);
   // Во время подбора (и фонового) кнопка — «Отключить»: останавливает и подбор.
-  $("power-label").textContent = isOn() || V.zapret_testing ? t("Отключить") : t("Подключить");
+  p.setAttribute("aria-label", isOn() || V.zapret_testing ? t("Отключить") : t("Подключить"));
+  renderHero();
+  renderWelcome();
 
   if (zMode) {
     $("cur-name").textContent = t("Zapret · без VPN");
@@ -239,7 +241,7 @@ function render() {
   $("chk-ads").checked = !!V.settings.block_ads;
   const nWarp = V.servers.filter((x) => isWarp(x.id)).length;
   setMeta("warp-meta", nWarp ? t("серверов: {nWarp}", { nWarp }) : t("нет"), nWarp > 0);
-  $("whatsnew").classList.toggle("hidden", load("wn-0.12") === "1");
+  $("whatsnew").classList.toggle("hidden", load("wn-0.12.1") === "1");
   const torNames = { off: t("выключен"), onion: t("только .onion"), sites: t("сайты из списка"), all: t("всё через Tor") };
   const tm = V.settings.tor_mode || "off";
   setMeta("tor-meta", tm === "off" ? t("выключен") : V.tor ? `${torNames[tm]} · ${V.tor[0] ? t("готов") : t("подключается")}` : torNames[tm], tm !== "off");
@@ -247,7 +249,8 @@ function render() {
   setMeta("wl-meta", V.wl_switched ? t("сейчас белые списки — на запасном") : wl ? `→ ${wl.name}` + (V.settings.wl_auto ? "" : t(" · вручную")) : t("сервер не выбран"), !!wl);
 
   $("speed").classList.toggle("idle", !V.connected);
-  $("banner-core").classList.toggle("hidden", V.core_installed);
+  // На первом запуске ядро — шаг 1 мастера, плашка не нужна.
+  $("banner-core").classList.toggle("hidden", V.core_installed || (!V.servers.length && !V.settings.zapret));
   const nShown = shown().length, nHid = V.servers.length - nShown;
   $("count").textContent = nHid ? t("{nShown} из {length}", { nShown, length: V.servers.length }) : V.servers.length;
   $("btn-filters").classList.toggle("on", filterOn());
@@ -271,6 +274,75 @@ function render() {
   sa.textContent = runningHere ? (speedRun ? t("Стоп · {done}/{total}", { done: speedRun.done, total: speedRun.total }) : t("Стоп")) : t("Скорость всех");
   sa.disabled = !nShown;
   renderList();
+}
+
+// ---------- главная: состояние крупно, таймер сессии ----------
+let connSince = null; // когда подключились (по часам окна) — для таймера
+function fmtClock(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const p2 = (n) => String(n).padStart(2, "0");
+  return `${p2(Math.floor(s / 3600))}:${p2(Math.floor((s % 3600) / 60))}:${p2(s % 60)}`;
+}
+function renderHero() {
+  const on = isOn() && !busy;
+  if (on && !connSince) connSince = Date.now();
+  if (!isOn()) connSince = null;
+  const label = $("power-label");
+  label.classList.toggle("on", on);
+  label.classList.toggle("busy", busy || !!V.zapret_testing);
+  label.textContent = busy ? t("Подключаюсь…")
+    : V.zapret_testing ? t("Подбираю стратегию…")
+    : V.zapret_active ? t("Zapret работает")
+    : V.connected ? t("Подключено")
+    : t("Не подключено");
+  let sub;
+  if (busy || V.zapret_testing) sub = t("Подождите немного");
+  else if (V.zapret_active) sub = t("без VPN · {name}", { name: V.zapret_name || "" }) + " · " + fmtClock(Date.now() - connSince);
+  else if (V.connected) {
+    const parts = [V.active_name || $("cur-name").textContent];
+    if (lastPing) parts.push(t("{ms} мс", { ms: lastPing }));
+    parts.push(fmtClock(Date.now() - connSince));
+    sub = parts.join(" · ");
+  } else sub = V.servers.length || V.settings.zapret ? t("Нажми кнопку, чтобы подключиться") : "";
+  $("hero-sub").textContent = sub;
+}
+setInterval(() => { if (V && connSince) renderHero(); }, 1000);
+
+// ---------- первый запуск ----------
+function renderWelcome() {
+  const empty = !V.servers.length && !V.settings.zapret;
+  $("welcome").classList.toggle("hidden", !empty);
+  document.querySelector('.page[data-page="home"]').classList.toggle("is-empty", empty);
+  $("wel-step-core").classList.toggle("done", !!V.core_installed);
+  $("wel-core-meta").textContent = V.core_installed ? t("скачано") : t("движок VPN, ~30 МБ с GitHub");
+}
+$("wel-core").onclick = (e) => downloadCore(e.currentTarget);
+$("wel-paste").onclick = async (e) => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  try {
+    const text = await call("read_clipboard");
+    if (!text || !text.trim()) return toast(t("В буфере пусто — скопируй ссылку на сервер или подписку"), true);
+    await importText(text);
+  } finally {
+    b.disabled = false;
+  }
+};
+$("wel-type").onclick = () => { showPage("servers"); $("import-text").focus(); };
+$("wel-vps").onclick = () => $("btn-vps-new").click();
+$("wel-zapret").onclick = () => document.querySelector('#seg-mode button[data-mode="zapret"]').click();
+
+// ---------- «Обход»: что не работает ----------
+for (const b of document.querySelectorAll(".scen")) {
+  b.onclick = () => {
+    const go = b.dataset.scen;
+    if (go === "diag") return $("btn-diag").click();
+    const g = $(go);
+    g.scrollIntoView({ behavior: "smooth", block: "start" });
+    g.classList.remove("flash");
+    void g.offsetWidth; // перезапустить анимацию
+    g.classList.add("flash");
+  };
 }
 
 function setMeta(id, text, on) {
@@ -1308,18 +1380,18 @@ function drawSpark() {
     spark.down.forEach((v, i) => ctx.lineTo(x(i), y(v)));
     ctx.lineTo(x(spark.down.length - 1), h);
     ctx.closePath();
-    ctx.fillStyle = cssColor("--green", 0.16);
+    ctx.fillStyle = cssColor("--accent", 0.16);
     ctx.fill();
     ctx.beginPath();
     spark.down.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))));
-    ctx.strokeStyle = cssColor("--green");
+    ctx.strokeStyle = cssColor("--accent");
     ctx.lineWidth = 3;
     ctx.stroke();
   }
   if (spark.up.length > 1) {
     ctx.beginPath();
     spark.up.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))));
-    ctx.strokeStyle = cssColor("--blue");
+    ctx.strokeStyle = cssColor("--accent-2");
     ctx.lineWidth = 2;
     ctx.stroke();
   }
@@ -1570,7 +1642,7 @@ $("btn-tweak-reset").onclick = async () => {
 };
 
 // ---------- что нового ----------
-$("btn-wn-hide").onclick = () => { store("wn-0.12", "1"); render(); };
+$("btn-wn-hide").onclick = () => { store("wn-0.12.1", "1"); render(); };
 for (const b of document.querySelectorAll(".wn-row")) {
   b.onclick = () => {
     const [page, btn] = b.dataset.go.split(":");
