@@ -14,6 +14,7 @@ pub mod export;
 pub mod filter;
 pub mod checks;
 pub mod geodata;
+pub mod guard;
 pub mod health;
 pub mod jsonsub;
 pub mod link;

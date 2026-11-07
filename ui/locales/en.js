@@ -1,6 +1,8 @@
 // Перевод окна. Ключ — русский текст из ui/index.html и t()/tk() в ui/*.js.
 // Проверка и заготовки: python3 scripts/i18n_ui.py [--add]
 window.RX_EN = {
+ "0.12: настройки на весь комп сверяются, окно с правами — со своим профилем": "0.12: system-wide settings are verified, the admin window has its own profile",
+ "0.12: новым — случайные порты прокси и шифрование серверов": "0.12: new installs get random proxy ports and encrypted servers",
  " (и ещё {n})": " (and {n} more)",
  " (мимо текущего VPN)": " (bypassing the current VPN)",
  " (с учётом фильтров)": " (filters applied)",
@@ -53,7 +55,6 @@ window.RX_EN = {
  "DNS через HTTPS (DoH)": "DNS over HTTPS (DoH)",
  "DNS через VPN": "DNS through VPN",
  "Discord — через VPN (с голосом)": "Discord — through VPN (with voice)",
- "English: язык окна — как в Windows или вручную": "English: window language — as in Windows or manual",
  "HTTP порт": "HTTP port",
  "IP или адрес сервера": "Server IP or address",
  "IP-адрес": "IP address",
@@ -633,7 +634,7 @@ window.RX_EN = {
  "Через каждый сервер скачается до 3 МБ с Cloudflare: {n} шт. — до {n2} МБ трафика": "Up to 3 MB from Cloudflare will be downloaded through each server: {n} servers — up to {n2} MB of traffic",
  "Через сервер": "Through server",
  "Что идёт не по общему режиму: отдельные сайты, свой сервер для сервиса, программы, свои правила.": "What doesn't follow the general mode: individual sites, an own server for a service, programs, own rules.",
- "Что нового в 0.9–0.11": "What's new in 0.9–0.11",
+ "Что нового в 0.10–0.12": "What's new in 0.10–0.12",
  "Что нового: ": "What's new: ",
  "Что провайдер сделал с сайтом и что включить": "What the ISP did to a site and what to turn on",
  "Что пускать через VPN": "What to send through VPN",

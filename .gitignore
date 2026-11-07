@@ -3,3 +3,4 @@ src-tauri/gen/
 src-tauri/bundled-core/
 *.json.tmp
 __pycache__/
+dist/

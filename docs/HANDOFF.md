@@ -33,6 +33,14 @@ static.rust-lang.org закрыт — `rustup target add x86_64-pc-windows-gnu` 
 - Если в контейнере нет коммита 2d8144b78 для `git fetch` — тег `1.97.0` (тот же коммит).
 
 ## Сделано
+- 0.12.0 — аудит перед публикацией:
+  - `src-tauri/build.rs`: релиз без RXVPN_UPDATE_REPO/RXVPN_UPDATE_PUBKEY падает (обход — RXVPN_ALLOW_NO_UPDATES=1).
+    Сборка 0.12.0: репозиторий `rxmv/rxvpn`, публичный ключ f5df55b7…88b8; приватный — у владельца, НЕ в репозитории.
+  - `webview_dir`: копия с правами — профиль WebView2 в `%ProgramFiles%\rxvpn\webview`.
+  - `core/src/guard.rs`: снимок охраняемых настроек в `%ProgramFiles%\rxvpn\settings-guard.json`, пишется в `persist`
+    копией с правами; при старте с правами — `guard_settings` (MessageBox, по умолчанию «Нет» → revert).
+  - `Store::fresh` (нет state.json): случайные порты 20000–39999 + encrypt_state=true. `Settings::default` не менялся.
+  - Не сделано: kill switch (WFP) в TUN, подпись exe, SOCKS с паролем (сломает программы, настроенные на прокси).
 - 0.11.0 — с правами администратора rxvpn работает только из защищённой копии (защита от «вирус → админ»).
   Установщика нет (решение владельца: только портативная).
   - `core/src/protect.rs`: копия в `%ProgramFiles%\rxvpn` (KnownFolder): rxvpn.exe (сам себя — доверие с

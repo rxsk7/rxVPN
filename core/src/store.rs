@@ -127,16 +127,53 @@ pub struct ImportResult {
     pub errors: Vec<String>,
 }
 
+/// Случайная пара соседних портов для SOCKS/HTTP (20000–39998, ниже динамических 49152+
+/// и типичных диапазонов, которые резервирует Hyper-V). Обе свободны сейчас — иначе
+/// следующая попытка; не нашлось — привычные 10900/10901.
+fn random_port_pair() -> (u16, u16) {
+    for _ in 0..32 {
+        let mut b = [0u8; 2];
+        if getrandom::getrandom(&mut b).is_err() {
+            break;
+        }
+        let p = 20000 + (u16::from_le_bytes(b) % 10000) * 2;
+        if crate::runner::port_free(p) && crate::runner::port_free(p + 1) {
+            return (p, p + 1);
+        }
+    }
+    let d = crate::xray::Settings::default();
+    (d.socks_port, d.http_port)
+}
+
 impl Store {
     pub fn load(path: &Path) -> Self {
         Self::load_ex(path).0
+    }
+
+    /// Первый запуск (state.json ещё нет). Отличия от `default()` — только для новых,
+    /// у старых пользователей ничего не меняется:
+    /// * порты SOCKS/HTTP — случайная пара 20000–59999, а не известные всем 10900/10901:
+    ///   программы (в том числе SDK «определения VPN») перебирают типичные порты
+    ///   клиентов на 127.0.0.1, чтобы найти прокси и узнать IP VPN-сервера;
+    /// * state.json шифруется (DPAPI) — пароли серверов не лежат открытым текстом.
+    ///   Перенос на другой комп — через бэкап (как и раньше при включённой галочке).
+    pub fn fresh() -> Self {
+        let mut s = Self::default();
+        let (socks, http) = random_port_pair();
+        s.settings.socks_port = socks;
+        s.settings.http_port = http;
+        s.settings.encrypt_state = cfg!(windows);
+        s
     }
 
     /// Как `load`, плюс true, если файл зашифрован (DPAPI) и расшифровать его тут
     /// нельзя: другой комп или другая учётка. Такой файл не трогаем и не затираем —
     /// вызывающий не должен сохранять поверх него.
     pub fn load_ex(path: &Path) -> (Self, bool) {
-        let Ok(bytes) = std::fs::read(path) else { return (Self::default(), false) };
+        let Ok(bytes) = std::fs::read(path) else {
+            // Нет state.json — первый запуск: настройки «для новых» (fresh).
+            return (if path.exists() { Self::default() } else { Self::fresh() }, false);
+        };
         let text = match unseal(&bytes) {
             Some(Ok(plain)) => String::from_utf8_lossy(&plain).into_owned(),
             Some(Err(_)) => return (Self::default(), true),
@@ -405,7 +442,7 @@ pub const MAX_SUB_NAME: usize = 60;
 /// Управляющие, «невидимые» и меняющие направление текста символы. ZWJ/ZWNJ
 /// (U+200C/U+200D), селекторы вариантов и теги U+E0020…E007F можно: на них
 /// держатся эмодзи вроде «👨‍💻» и флага Шотландии и письменности вроде персидской.
-fn invisible(c: char) -> bool {
+pub(crate) fn invisible(c: char) -> bool {
     c.is_control()
         || matches!(
             c,
@@ -550,6 +587,21 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn first_run_gets_random_ports_and_encryption() {
+        let d = std::env::temp_dir().join(format!("rxvpn-fresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (s, locked) = Store::load_ex(&d.join("state.json"));
+        assert!(!locked);
+        assert_eq!(s.settings.http_port, s.settings.socks_port + 1);
+        assert!(s.settings.socks_port >= 20000 && s.settings.http_port < 40000 || s.settings.socks_port == 10900);
+        assert_eq!(s.settings.encrypt_state, cfg!(windows));
+        assert!(crate::xray::validate_settings(&s.settings).is_ok());
+        // У старых пользователей (state.json есть) — без изменений.
+        let d0 = Settings::default();
+        assert_eq!((d0.socks_port, d0.encrypt_state), (10900, false));
+    }
 
     #[test]
     fn folders() {

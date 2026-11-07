@@ -359,6 +359,30 @@ fn persist(st: &AppState) {
     }
     let s = st.store.lock().unwrap();
     let _ = s.save(&st.paths.store);
+    // Копия с правами — снимок охраняемых настроек рядом с собой (см. guard_settings).
+    if st.paths.protected && winsys::is_admin() {
+        let _ = rxvpn_core::guard::save(&st.paths.app_dir, &s.settings);
+    }
+}
+
+/// При запуске копии с правами: охраняемые настройки (DoH всей Windows, прокси в
+/// локальную сеть, DNS, своя папка zapret) поменялись не ею — спросить. «Нет» (по
+/// умолчанию) — вернуть из снимка. Итог сразу сохраняется (и в state.json, и в снимок).
+fn guard_settings(paths: &Paths, store: &mut Store) {
+    use rxvpn_core::guard;
+    let trusted = guard::load(&paths.app_dir);
+    let changes = guard::diff(&store.settings, trusted.as_ref());
+    if changes.is_empty() {
+        if trusted.is_none() {
+            let _ = guard::save(&paths.app_dir, &store.settings);
+        }
+        return;
+    }
+    if !winsys::confirm_box("rxvpn", &guard::prompt(&changes)) {
+        guard::revert(&mut store.settings, trusted.as_ref());
+        let _ = store.save(&paths.store);
+    }
+    let _ = guard::save(&paths.app_dir, &store.settings);
 }
 
 /// Итог проверки — для отчёта «Сообщить о проблеме» (по одному на вид).
@@ -4618,6 +4642,19 @@ fn spawn_sub_updater(app: AppHandle) {
     });
 }
 
+/// Профиль окна (WebView2): кэш, Code Cache, Local Storage, Preferences. Окно с правами
+/// администратора не должно читать его из папки data — туда пишет любая программа без
+/// прав, а подложенный профиль (кэш байткода V8, настройки) работал бы в окне, у которого
+/// есть все команды rxvpn. Поэтому копия с правами держит профиль у себя в Program Files
+/// (пишет туда только администратор), без прав — как раньше, в data.
+fn webview_dir(paths: &Paths, admin: bool) -> PathBuf {
+    if paths.protected && admin {
+        paths.app_dir.join("webview")
+    } else {
+        paths.data.join("webview")
+    }
+}
+
 /// Попросить права администратора. С правами rxvpn работает только из защищённой копии
 /// в Program Files: готова — окно UAC сразу для неё (в окне виден путь Program Files);
 /// нет или другая — для себя: такой запуск разложит копию (protect_and_launch).
@@ -4772,8 +4809,13 @@ pub fn run() {
     }
     // Язык: до чтения настроек — как в Windows (сообщения о битом state.json), потом — из настроек.
     rxvpn_core::i18n::set_lang(rxvpn_core::i18n::system_lang());
-    let (store, state_locked) = Store::load_ex(&paths.store);
+    let (mut store, state_locked) = Store::load_ex(&paths.store);
     rxvpn_core::i18n::set_lang(rxvpn_core::i18n::resolve(&store.settings.lang));
+    // Копия с правами: настройки, действующие на весь комп, сверяем со своим снимком
+    // в Program Files — state.json в data мог поменять кто угодно без прав (core/src/guard.rs).
+    if paths.protected && winsys::is_admin() && !state_locked {
+        guard_settings(&paths, &mut store);
+    }
     let stats = rxvpn_core::stats::Stats::load(&paths.data.join("stats.json"));
 
     // «Запускать с правами администратора»: копия без прав сразу просит их (окно
@@ -4885,13 +4927,13 @@ pub fn run() {
                 .ok_or(trs!("нет окна main в tauri.conf.json"))?;
             let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &cfg)?
                 .visible(!from_autostart);
-            let (portable, data, autostart, as_admin, auto_connect) = {
+            let (portable, webview_dir, autostart, as_admin, auto_connect) = {
                 let st = app.state::<AppState>();
                 let s = st.store.lock().unwrap();
-                (st.paths.portable, st.paths.data.clone(), s.settings.autostart, s.settings.run_as_admin, s.settings.auto_connect)
+                (st.paths.portable, webview_dir(&st.paths, winsys::is_admin()), s.settings.autostart, s.settings.run_as_admin, s.settings.auto_connect)
             };
             if portable {
-                builder = builder.data_directory(data.join("webview"));
+                builder = builder.data_directory(webview_dir);
             }
             builder.build()?;
 
