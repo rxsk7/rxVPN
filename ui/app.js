@@ -241,7 +241,7 @@ function render() {
   $("chk-ads").checked = !!V.settings.block_ads;
   const nWarp = V.servers.filter((x) => isWarp(x.id)).length;
   setMeta("warp-meta", nWarp ? t("серверов: {nWarp}", { nWarp }) : t("нет"), nWarp > 0);
-  $("whatsnew").classList.toggle("hidden", load("wn-0.13") === "1");
+  $("whatsnew").classList.toggle("hidden", load("wn-0.14") === "1");
   const torNames = { off: t("выключен"), onion: t("только .onion"), sites: t("сайты из списка"), all: t("всё через Tor") };
   const tm = V.settings.tor_mode || "off";
   setMeta("tor-meta", tm === "off" ? t("выключен") : V.tor ? `${torNames[tm]} · ${V.tor[0] ? t("готов") : t("подключается")}` : torNames[tm], tm !== "off");
@@ -1393,18 +1393,18 @@ function drawSpark() {
     spark.down.forEach((v, i) => ctx.lineTo(x(i), y(v)));
     ctx.lineTo(x(spark.down.length - 1), h);
     ctx.closePath();
-    ctx.fillStyle = cssColor("--accent", 0.16);
+    ctx.fillStyle = cssColor("--green", 0.16);
     ctx.fill();
     ctx.beginPath();
     spark.down.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))));
-    ctx.strokeStyle = cssColor("--accent");
+    ctx.strokeStyle = cssColor("--green");
     ctx.lineWidth = 3;
     ctx.stroke();
   }
   if (spark.up.length > 1) {
     ctx.beginPath();
     spark.up.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))));
-    ctx.strokeStyle = cssColor("--accent-2");
+    ctx.strokeStyle = cssColor("--blue");
     ctx.lineWidth = 2;
     ctx.stroke();
   }
@@ -1655,7 +1655,7 @@ $("btn-tweak-reset").onclick = async () => {
 };
 
 // ---------- что нового ----------
-$("btn-wn-hide").onclick = () => { store("wn-0.13", "1"); render(); };
+$("btn-wn-hide").onclick = () => { store("wn-0.14", "1"); render(); };
 for (const b of document.querySelectorAll(".wn-row")) {
   b.onclick = () => {
     const [page, btn] = b.dataset.go.split(":");

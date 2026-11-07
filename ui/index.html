@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="theme.css" />
 </head>
 <body>
-  <header class="top">
+  <aside class="side" id="side">
     <div class="brand">
       <svg class="logo" viewBox="0 0 1024 1024" aria-hidden="true">
         <defs>
@@ -23,16 +23,18 @@
         </g>
       </svg><span>rxvpn</span>
     </div>
-    <nav class="seg tabs" id="tabs" aria-label="Разделы">
-      <button data-page="home" class="active">Главная</button>
-      <button data-page="servers">Сервера</button>
-      <button data-page="routes">Маршруты</button>
-      <button data-page="bypass">Обход</button>
-      <button data-page="more">Ещё</button>
+    <nav class="tabs" id="tabs" aria-label="Разделы">
+      <button data-page="home" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 11 12 4l9 7v9h-6v-6H9v6H3z"/></svg><span>Главная</span></button>
+      <button data-page="servers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/></svg><span>Сервера</span></button>
+      <button data-page="routes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 20V9a3 3 0 0 1 3-3h9"/><path d="m15 3 3 3-3 3"/><circle cx="6" cy="20" r="1.5"/></svg><span>Маршруты</span></button>
+      <button data-page="bypass"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 12h5l3-6 3 12 3-6h2"/></svg><span>Обход</span></button>
+      <button data-page="more"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/></svg><span>Ещё</span></button>
     </nav>
+    <div class="side-grow"></div>
     <div class="status" id="status" data-state="off"><span class="dot"></span><span id="status-text">Отключено</span></div>
-  </header>
+  </aside>
 
+  <div class="col">
   <div class="banner hidden" id="banner-core">
     <span>Ядро Xray ещё не скачано — без него подключиться нельзя.</span>
     <button class="primary small" id="btn-core-banner">Скачать ядро</button>
@@ -83,7 +85,10 @@
        <div class="home-main">
         <div class="power-wrap">
           <button class="power" id="btn-connect" aria-label="Подключить">
-            <svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
+            <img class="k2" src="img/k2.webp" alt="" draggable="false" />
+            <!-- лавина: белая пелена стекает сверху вниз; маска по яркости картинки — снег ложится на снег, а не на небо -->
+            <span class="veil" aria-hidden="true"></span>
+            <span class="powder" aria-hidden="true"></span>
           </button>
         </div>
         <div class="power-label" id="power-label">Не подключено</div>
@@ -313,7 +318,8 @@
     <section class="page" data-page="more">
       <div class="page-inner">
         <div class="whatsnew" id="whatsnew">
-          <div class="wn-head"><b>Что нового в 0.11–0.13</b><button class="ghost small" id="btn-wn-hide">Скрыть</button></div>
+          <div class="wn-head"><b>Что нового в 0.12–0.14</b><button class="ghost small" id="btn-wn-hide">Скрыть</button></div>
+          <button class="wn-row" data-go="home"><span>0.14: боковое меню и кнопка-гора K2 — при подключении сходит лавина</span><span class="nav-meta">Главная ›</span></button>
           <button class="wn-row" data-go="more:btn-settings"><span>0.13: kill switch — упал VPN, интернет закрыт, ничего не утечёт</span><span class="nav-meta">Ещё → Настройки ›</span></button>
           <button class="wn-row" data-go="home"><span>0.12.1: новый дизайн — главная-дашборд, первый запуск в 3 шага</span><span class="nav-meta">Главная ›</span></button>
           <button class="wn-row" data-go="bypass"><span>0.12.1: «Что не работает?» — обход по ситуации</span><span class="nav-meta">Обход ›</span></button>
@@ -350,6 +356,7 @@
       </div>
     </section>
   </main>
+  </div>
 
   <!-- Настройки -->
   <dialog id="dlg-settings">
