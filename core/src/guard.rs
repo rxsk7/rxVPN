@@ -157,8 +157,7 @@ mod tests {
     #[test]
     fn tampered_fields_are_seen_and_reverted() {
         let d = tmp("t");
-        let mut s = Settings::default();
-        s.doh_url = "https://good.example/dns-query".into();
+        let mut s = Settings { doh_url: "https://good.example/dns-query".into(), ..Default::default() };
         save(&d, &s).unwrap();
         let trusted = load(&d);
         assert!(diff(&s, trusted.as_ref()).is_empty(), "своё сохранение — без вопросов");
@@ -180,8 +179,7 @@ mod tests {
 
     #[test]
     fn no_guard_yet_compares_with_defaults() {
-        let mut s = Settings::default();
-        s.allow_lan = true;
+        let mut s = Settings { allow_lan: true, ..Default::default() };
         assert_eq!(diff(&s, None).len(), 1);
         revert(&mut s, None);
         assert!(!s.allow_lan);
@@ -192,8 +190,7 @@ mod tests {
         let d = tmp("b");
         std::fs::write(d.join(FILE), b"[1,2,3]").unwrap();
         assert!(load(&d).is_none());
-        let mut s = Settings::default();
-        s.allow_lan = true;
+        let mut s = Settings { allow_lan: true, ..Default::default() };
         revert(&mut s, Some(&serde_json::json!({ "allow_lan": "не bool" })));
         assert!(!s.allow_lan, "нечитаемый снимок — по умолчанию");
         let _ = std::fs::remove_dir_all(&d);

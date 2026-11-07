@@ -38,6 +38,11 @@ fn physical_interface_named() {
     let alias = winsys::iface_alias(i);
     println!("карта #{i}: {alias:?}");
     assert!(alias.as_deref().is_some_and(|a| !a.is_empty()), "имя подключения");
+    if alias.as_deref() == Some(rxvpn_core::xray::TUN_NAME) {
+        // Работает rxvpn в режиме «Весь комп»: лучший путь — наш туннель, карту он не отдаёт.
+        assert_eq!(winsys::physical_interface(rxvpn_core::xray::TUN_NAME), None, "туннель — не сетевая карта");
+        return;
+    }
     assert_eq!(winsys::physical_interface(rxvpn_core::xray::TUN_NAME), Some(i));
     assert_eq!(winsys::physical_interface(alias.as_deref().unwrap()), None, "совпало с именем туннеля — не берём");
     assert_eq!(winsys::iface_alias(0x7fff_fff0), None);
@@ -144,7 +149,11 @@ fn control_without_job_xray_survives() {
 #[cfg(windows)]
 #[test]
 fn single_instance_mutex() {
-    let first = rxvpn_core::winsys::acquire_instance(false).expect("первая копия");
+    // Уже запущен настоящий rxvpn — он и держит замок: вторую копию честно не пускаем.
+    let Some(first) = rxvpn_core::winsys::acquire_instance(false) else {
+        assert!(rxvpn_core::winsys::list_processes().iter().any(|p| p.eq_ignore_ascii_case("rxvpn.exe")), "замок занят, а rxvpn не запущен");
+        return;
+    };
     assert!(rxvpn_core::winsys::acquire_instance(false).is_none(), "вторая — нет");
     drop(first);
     assert!(rxvpn_core::winsys::acquire_instance(false).is_some(), "после закрытия первой — можно");
