@@ -1,0 +1,1004 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>rxvpn</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 1024 1024" aria-hidden="true">
+        <defs>
+          <linearGradient id="lg-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#26262a"/><stop offset="1" stop-color="#050505"/></linearGradient>
+          <linearGradient id="lg-sh" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d9dce2"/><stop offset="1" stop-color="#aeb3bb"/></linearGradient>
+          <clipPath id="lg-sq"><rect width="1024" height="1024" rx="228"/></clipPath>
+        </defs>
+        <g clip-path="url(#lg-sq)">
+          <rect width="1024" height="1024" fill="url(#lg-bg)"/>
+          <path fill="#fff" d="M0 1024V812l120-72 90-80 70-60 50-80 42-50 28-60 40-50 30-60 42-70 42 60 26 40 38 30 48 12 40 48 42 80 58 70 80 80 144 110V1024z"/>
+          <path fill="url(#lg-sh)" d="M512 230l42 60 26 40 38 30 48 12 40 48 42 80 58 70 80 80 144 110V1024H648l-28-170 10-150-46-170-28-150z"/>
+        </g>
+      </svg><span>rxvpn</span>
+    </div>
+    <nav class="seg tabs" id="tabs" aria-label="Разделы">
+      <button data-page="home" class="active">Главная</button>
+      <button data-page="servers">Сервера</button>
+      <button data-page="routes">Маршруты</button>
+      <button data-page="bypass">Обход</button>
+      <button data-page="more">Ещё</button>
+    </nav>
+    <div class="status" id="status" data-state="off"><span class="dot"></span><span id="status-text">Отключено</span></div>
+  </header>
+
+  <div class="banner hidden" id="banner-core">
+    <span>Ядро Xray ещё не скачано — без него подключиться нельзя.</span>
+    <button class="primary small" id="btn-core-banner">Скачать ядро</button>
+  </div>
+
+  <main class="pages">
+    <!-- Главная: кнопка, сервер, режим — и всё -->
+    <section class="page active" data-page="home">
+      <div class="home">
+        <button class="power" id="btn-connect" aria-label="Подключить">
+          <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
+        </button>
+        <div class="power-label" id="power-label">Подключить</div>
+
+        <button class="card-row" id="btn-current">
+          <span class="cr-text">
+            <span class="cur-name" id="cur-name">Сервер не выбран</span>
+            <span class="cur-meta" id="cur-meta">Добавь ссылку на сервер или подписку</span>
+          </span>
+          <span class="chev">›</span>
+        </button>
+
+        <div class="mode-block">
+          <div class="seg seg-mode3" id="seg-mode">
+            <button data-mode="proxy">Браузер</button>
+            <button data-mode="tun">Весь комп</button>
+            <button data-mode="zapret">Без VPN</button>
+          </div>
+          <div class="mode-hint" id="mode-hint"></div>
+        </div>
+
+        <!-- Что пускать через VPN — то же, что во вкладке «Маршруты» -->
+        <div class="mode-block" id="route-home">
+          <div class="seg seg3" id="seg-route-home">
+            <button data-route="bypassru">Обход РФ</button>
+            <button data-route="blocked">Только блок.</button>
+            <button data-route="global">Всё</button>
+          </div>
+          <div class="mode-hint" id="route-hint-home"></div>
+        </div>
+
+        <!-- Telegram без VPN — одной галочкой (подробности — во вкладке «Обход») -->
+        <div class="tg-home" id="tg-home">
+          <svg class="tg-ico" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M21 4 3 11l6 2.5L19 7l-8 8 .5 5 3-3.5L19 20z"/></svg>
+          <span class="cr-text">
+            <span class="tg-title">Telegram без VPN</span>
+            <span class="nav-meta" id="tg-home-meta">выключено</span>
+          </span>
+          <button type="button" class="ghost small hidden" id="btn-tg-home-open" title="Открыть Telegram Desktop и подключить прокси">Подключить</button>
+          <input type="checkbox" id="chk-tg-home" aria-label="Telegram без VPN" title="Telegram Desktop — через веб-вход, без VPN" />
+        </div>
+
+        <!-- Проверки — на виду, каждая открывается окном поверх -->
+        <div class="health ok" id="health"><span id="health-text">Всё в порядке</span><button type="button" class="ghost small hidden" id="health-btn"></button></div>
+
+        <div class="chips home-tools" id="home-tools">
+          <button type="button" id="ht-diag" title="Что провайдер сделал с сайтом и что включить">Сайт не открывается?</button>
+          <button type="button" id="ht-ip" title="С какого IP тебя видят сайты, утечки DNS и IPv6">Мой IP и утечки</button>
+          <button type="button" id="ht-speed" title="Скорость через VPN (Cloudflare)">Скорость</button>
+          <button type="button" id="ht-svc" title="Страна сервера и работают ли ChatGPT, Gemini, YouTube Premium, Netflix">Сервисы</button>
+          <button type="button" id="ht-tweak" title="Сервер не подключается? Подберу обход блокировки">Обход</button>
+        </div>
+
+        <div class="speed idle" id="speed">
+          <div class="speed-nums">
+            <div><span class="arrow down">↓</span><span class="sp" id="sp-down">0 Б/с</span></div>
+            <div><span class="arrow up">↑</span><span class="sp" id="sp-up">0 Б/с</span></div>
+          </div>
+          <canvas id="spark" width="560" height="96"></canvas>
+          <div class="speed-total" id="sp-total">За сессию: —</div>
+        </div>
+      </div>
+
+      <!-- Лог: что делают rxvpn, Xray и zapret -->
+      <section class="home-log log" id="log-box">
+        <div class="log-head">
+          <span class="log-title">Лог</span>
+          <span class="log-hint">красное — ошибки</span>
+          <button class="ghost small" id="btn-log-copy">Копировать</button>
+          <button class="ghost small" id="btn-log-clear">Очистить</button>
+        </div>
+        <pre id="log"></pre>
+      </section>
+    </section>
+
+    <!-- Сервера -->
+    <section class="page" data-page="servers">
+      <div class="card servers">
+        <div class="import">
+          <textarea id="import-text" rows="2" spellcheck="false"
+            placeholder="Вставь ссылку: vless:// vmess:// trojan:// ss:// hy2:// или https://ссылка-на-подписку — можно несколько строк"></textarea>
+          <div class="import-actions">
+            <button class="ghost" id="btn-paste">Из буфера</button>
+            <button class="primary" id="btn-add">Добавить</button>
+          </div>
+        </div>
+
+        <div class="vps-head">
+          <span class="label">Мои VPS</span>
+          <button class="ghost small" id="btn-vps-new" title="rxvpn сам поставит VPN на твой VPS по SSH">+ Свой сервер</button>
+        </div>
+        <div class="vps-list" id="vps-list"></div>
+
+        <div class="list-head">
+          <span class="label">Сервера <span class="count" id="count">0</span></span>
+          <div class="list-tools">
+            <button class="ghost small" id="btn-test" title="Реальная задержка каждого сервера">Проверить все</button>
+            <button class="ghost small" id="btn-fastest" title="Подключиться к самому быстрому из проверенных">Самый быстрый</button>
+            <button class="ghost small" id="btn-speed-all" title="Скорость каждого сервера: 3 МБ с Cloudflare через каждый">Скорость всех</button>
+            <button class="ghost small toggle" id="btn-sort" title="Сортировать: по задержке, потом по скорости">⇅</button>
+            <button class="ghost small toggle" id="btn-filters" title="Скрыть мёртвые и дубли; страны и слова — кнопкой «Фильтр» у подписки">Фильтры</button>
+            <button class="ghost small toggle hidden" id="btn-hidden" title="Показать сервера, скрытые фильтрами"></button>
+            <button class="ghost small" id="btn-update-subs" title="Обновить подписки">↻</button>
+          </div>
+        </div>
+
+        <div class="list" id="server-list"></div>
+      </div>
+    </section>
+
+    <!-- Маршруты: что через VPN, что мимо -->
+    <section class="page" data-page="routes">
+      <div class="page-inner">
+        <p class="hint page-note hidden" id="routes-note">Сейчас режим «Без VPN» — маршруты действуют, когда включён VPN («Браузер» или «Весь комп»).</p>
+
+        <div class="group" id="route-field">
+          <h3 class="sec">Что пускать через VPN</h3>
+          <div class="seg seg3" id="seg-route">
+            <button data-route="bypassru">Обход РФ</button>
+            <button data-route="blocked">Только блок.</button>
+            <button data-route="global">Всё</button>
+          </div>
+          <p class="hint" id="route-hint"></p>
+        </div>
+
+        <div class="group">
+          <h3 class="sec">Сайты и программы</h3>
+          <div class="nav-list">
+            <button class="ghost nav-row" id="btn-sites"><span>Свои сайты</span><span class="nav-meta" id="sites-count">не заданы</span></button>
+            <button class="ghost nav-row" id="btn-sitesrv"><span>Сайт → свой сервер</span><span class="nav-meta" id="sitesrv-count">не заданы</span></button>
+            <button class="ghost nav-row" id="btn-apps"><span>Программы</span><span class="nav-meta" id="apps-count">не заданы</span></button>
+            <button class="ghost nav-row" id="btn-rules"><span>Правила</span><span class="nav-meta" id="rules-count">нет</span></button>
+            <label class="check switch-row nav-switch"><input type="checkbox" id="chk-ads" /> Блокировать рекламу и трекеры</label>
+          </div>
+          <p class="hint">Что идёт не по общему режиму: отдельные сайты, свой сервер для сервиса, программы, свои правила.</p>
+        </div>
+
+        <div class="group">
+          <h3 class="sec">Где ты подключаешься</h3>
+          <div class="nav-list">
+            <button class="ghost nav-row" id="btn-net"><span>Профили по сети</span><span class="nav-meta" id="net-meta">выключено</span></button>
+            <button class="ghost nav-row" id="btn-wl"><span>Белые списки</span><span class="nav-meta" id="wl-meta">сервер не выбран</span></button>
+          </div>
+          <p class="hint">Дома, в кафе, на мобильном с белыми списками — rxvpn сам переключит режим или сервер.</p>
+        </div>
+
+
+
+
+      </div>
+    </section>
+
+    <!-- Обход: без VPN (zapret, Telegram) и анонимность (Tor, WARP) -->
+    <section class="page" data-page="bypass">
+      <div class="page-inner">
+        <div class="group" id="zapret-field">
+          <h3 class="sec">Через zapret, мимо VPN</h3>
+          <div class="nav-list">
+            <label class="check switch-row nav-switch"><input type="checkbox" id="chk-hybrid" /> Включено</label>
+            <label class="check switch-row nav-switch hyb-svc"><input type="checkbox" data-svc="youtube" /> YouTube</label>
+            <label class="check switch-row nav-switch hyb-svc"><input type="checkbox" data-svc="discord" /> Discord</label>
+            <label class="check switch-row nav-switch hyb-svc"><input type="checkbox" data-svc="twitch" /> Twitch</label>
+            <button class="ghost nav-row" id="btn-hyb-sites"><span>Свой сайт…</span><span class="nav-meta" id="hyb-sites-meta">нет</span></button>
+            <button class="ghost nav-row" id="btn-zapret"><span>Стратегия zapret</span><span class="nav-meta" id="zapret-meta">не выбрана</span></button>
+          </div>
+          <p class="hint">Быстрее и без расхода трафика VPN: «замедлялку» провайдера обходит zapret прямо у тебя, а остальное
+            идёт через VPN как обычно. Отмеченные сайты при этом видят твой настоящий IP. Нужны права администратора.
+            Добавил сервис — нажми «Подобрать лучшую» в «Стратегии zapret»: стратегия проверится и на нём.</p>
+        </div>
+
+        <div class="group" id="doh-field">
+          <h3 class="sec">DNS без подмены · «Без VPN»</h3>
+          <div class="nav-list">
+            <label class="check switch-row nav-switch"><input type="checkbox" id="chk-doh" /> DNS через HTTPS (DoH)</label>
+            <button class="ghost nav-row" id="btn-doh"><span>Сервер DoH</span><span class="nav-meta" id="doh-meta">Cloudflare</span></button>
+          </div>
+          <p class="hint">В режиме «Без VPN» Windows спрашивает адреса сайтов у rxvpn, а rxvpn — у Cloudflare, Google или
+            твоего сервера по HTTPS: провайдер не подсунет заглушку вместо сайта и не увидит, что ты открываешь по DNS.
+            На время работы rxvpn ставит в сетевые карты DNS 127.0.0.1, прежние остаются запасными; отключил или закрыл
+            rxvpn — всё как было. Нужны права администратора (как и zapret).</p>
+        </div>
+
+        <div class="group" id="tg-field">
+          <h3 class="sec">Telegram · без VPN</h3>
+          <div class="nav-list">
+            <label class="check switch-row nav-switch"><input type="checkbox" id="chk-tg" /> Telegram без VPN</label>
+            <button class="ghost nav-row" id="btn-tg-open"><span>Подключить Telegram Desktop</span><span class="nav-meta" id="tg-meta">выключено</span></button>
+            <label class="check switch-row nav-switch"><input type="checkbox" id="chk-tg-cf" /> Запасной путь через Cloudflare</label>
+          </div>
+          <p class="hint" id="tg-hint">Telegram Desktop ходит к своим серверам через веб-вход, как web.telegram.org: его режут
+            слабее. VPN не нужен, переписка шифруется как обычно. Включи → «Подключить Telegram Desktop» → в Telegram
+            «Подключить прокси». Мобильный Telegram и звонки так не работают.</p>
+        </div>
+
+        <div class="group">
+          <h3 class="sec">Анонимность и выход</h3>
+          <div class="nav-list">
+            <button class="ghost nav-row" id="btn-tor"><span>Tor</span><span class="nav-meta" id="tor-meta">выключен</span></button>
+            <button class="ghost nav-row" id="btn-warp-info"><span>WARP поверх сервера</span><span class="nav-meta" id="warp-meta">нет</span></button>
+          </div>
+          <p class="hint">Tor идёт через твой VPN: сайт видит выходной узел Tor. WARP — выход через Cloudflare поверх своего
+            сервера, для сервисов, которые не пускают с адресов хостеров (добавляется у сервера: «⋯» → «WARP поверх»).</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ещё: проверки, настройки, лог -->
+    <section class="page" data-page="more">
+      <div class="page-inner">
+        <div class="whatsnew" id="whatsnew">
+          <div class="wn-head"><b>Что нового в 0.9–0.11</b><button class="ghost small" id="btn-wn-hide">Скрыть</button></div>
+          <button class="wn-row" data-go="more:btn-settings"><span>Защита от вирусов: права администратора — только у копии в Program Files</span><span class="nav-meta">Ещё → Настройки ›</span></button>
+          <button class="wn-row" data-go="servers:btn-filters"><span>Фильтры серверов: страны, дубли, мёртвые</span><span class="nav-meta">Сервера → Фильтры ›</span></button>
+          <button class="wn-row" data-go="servers"><span>Скорость всех серверов, «Авто» с учётом скорости</span><span class="nav-meta">Сервера → Скорость всех ›</span></button>
+          <button class="wn-row" data-go="bypass"><span>DNS без подмены (DoH) в режиме «Без VPN»</span><span class="nav-meta">Обход → DNS через HTTPS ›</span></button>
+          <button class="wn-row" data-go="more:btn-report"><span>Сообщить о проблеме — отчёт без паролей и адресов</span><span class="nav-meta">Ещё ›</span></button>
+          <button class="wn-row" data-go="more:btn-settings"><span>English: язык окна — как в Windows или вручную</span><span class="nav-meta">Ещё → Настройки ›</span></button>
+        </div>
+        <div class="group">
+          <h3 class="sec">Проверка</h3>
+          <div class="nav-list">
+            <button class="ghost nav-row" id="btn-diag"><span>Почему не открывается сайт</span><span class="nav-meta">проверка за 10 секунд</span></button>
+            <button class="ghost nav-row" id="btn-real"><span>Задержка до сервера</span><span class="delay-res" id="real-res"></span></button>
+            <button class="ghost nav-row" id="btn-ip"><span>Мой IP и утечка DNS</span></button>
+            <button class="ghost nav-row" id="btn-speed"><span>Скорость</span></button>
+          </div>
+        </div>
+        <div class="group">
+          <h3 class="sec">Телефон</h3>
+          <div class="nav-list">
+            <button class="ghost nav-row" id="btn-phone"><span>Перенести на iPhone / Android</span><span class="nav-meta">маршруты для Happ</span></button>
+          </div>
+        </div>
+        <div class="group">
+          <h3 class="sec">Программа</h3>
+          <div class="nav-list">
+            <button class="ghost nav-row" id="btn-report"><span>Сообщить о проблеме</span><span class="nav-meta">отчёт без паролей и адресов</span></button>
+            <button class="ghost nav-row" id="btn-settings"><span>Настройки</span><span class="nav-meta">запуск, порты, DNS, анти-DPI, бэкап, ядро</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Настройки -->
+  <dialog id="dlg-settings">
+    <form method="dialog" class="dlg" id="form-settings">
+      <h2>Настройки</h2>
+
+      <label translate="no">Язык · Language
+        <select id="set-lang">
+          <option value="">Как в Windows · System</option>
+          <option value="ru">Русский</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+
+      <h3>Запуск</h3>
+      <label class="check"><input type="checkbox" name="autostart" /> Запускать вместе с Windows (в трее)</label>
+      <label class="check"><input type="checkbox" name="auto_connect" /> Подключаться сразу при запуске</label>
+      <label class="check"><input type="checkbox" name="close_to_tray" /> Крестик сворачивает в трей, а не закрывает</label>
+      <p class="hint">Выйти совсем — правой кнопкой по значку у часов → «Выход».</p>
+      <label class="check"><input type="checkbox" name="run_as_admin" /> Запускать с правами администратора</label>
+      <p class="hint">Нужно для zapret и режима «Весь комп»: они меняют сеть всего компа (драйвер WinDivert,
+        сетевой адаптер TUN), а Windows разрешает это только администратору. С галочкой rxvpn при каждом
+        запуске — и при входе в Windows — спросит права в окне «Да/Нет». Без неё спросит только когда
+        понадобятся. Окно появилось, а rxvpn ты не запускал — жми «Нет».</p>
+
+      <h3>Подключение</h3>
+      <div class="grid2">
+        <label>SOCKS порт<input type="number" name="socks_port" min="1024" max="65535" /></label>
+        <label>HTTP порт<input type="number" name="http_port" min="1024" max="65535" /></label>
+      </div>
+      <p class="hint">Не ставь 10808/10809 — их занимают Happ и v2rayN.</p>
+      <label class="check"><input type="checkbox" name="system_proxy" /> Ставить системный прокси Windows (в режиме «Прокси»)</label>
+      <label class="check"><input type="checkbox" name="allow_lan" /> Пускать устройства из домашней сети</label>
+      <p class="hint">Прокси откроется для всей сети <b>без пароля</b>. Включай только дома, не в кафе и не в общежитии.</p>
+      <div class="grid2">
+        <label>Обновлять подписки, часов<input type="number" name="sub_update_hours" min="0" max="168" /></label>
+        <label>Уровень лога
+          <select name="log_level">
+            <option value="warning">warning</option>
+            <option value="info">info</option>
+            <option value="debug">debug</option>
+            <option value="error">error</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint">0 часов — не обновлять самому.</p>
+
+      <h3>Обход блокировок (анти-DPI)</h3>
+      <label class="check"><input type="checkbox" name="fragment" id="chk-fragment" /> Фрагментация TLS — резать первый пакет на куски</label>
+      <div class="grid2" id="fragment-opts">
+        <label>Размер кусков, байт<input type="text" name="fragment_length" spellcheck="false" placeholder="100-200" /></label>
+        <label>Пауза между ними, мс<input type="text" name="fragment_delay" spellcheck="false" placeholder="10-20" /></label>
+      </div>
+      <label class="check"><input type="checkbox" name="udp_noise" /> Шумы для UDP-серверов (KCP, QUIC, Hysteria)</label>
+      <p class="hint">Включай, если сервер не подключается или сайты «висят»: провайдер ищет имя сайта в первом
+        пакете, а по кускам его не узнаёт. Работает и с REALITY. Цена — примерно +0,1–0,2 с на каждое новое
+        соединение. Если провайдер режет по IP сервера, не поможет — тут нужен каскад.</p>
+
+      <h3>Уведомления</h3>
+      <div class="core-row">
+        <label class="check"><input type="checkbox" name="notifications" /> Уведомления Windows</label>
+        <button type="button" class="ghost small" id="btn-notify-test">Показать пробное</button>
+      </div>
+      <p class="hint">Когда сервер перестал отвечать, «Авто» переключился, ядро упало, подключение из трея.</p>
+
+      <h3>DNS</h3>
+      <div class="grid2">
+        <label>DNS через VPN<input name="dns_remote" list="dns-remote-list" spellcheck="false" /></label>
+        <label>DNS напрямую<input name="dns_direct" list="dns-direct-list" spellcheck="false" /></label>
+      </div>
+      <datalist id="dns-remote-list">
+        <option value="1.1.1.1">Cloudflare</option>
+        <option value="https://1.1.1.1/dns-query">Cloudflare DoH</option>
+        <option value="8.8.8.8">Google</option>
+        <option value="https://8.8.8.8/dns-query">Google DoH</option>
+        <option value="9.9.9.9">Quad9</option>
+      </datalist>
+      <datalist id="dns-direct-list">
+        <option value="77.88.8.8">Яндекс</option>
+        <option value="77.88.8.88">Яндекс безопасный</option>
+        <option value="localhost">Системный (провайдера)</option>
+      </datalist>
+      <p class="hint">«Через VPN» — для заблокированного (и всего в режиме «Всё»). «Напрямую» — для .ru, адресов
+        серверов и всего в «Только блок.». Можно IP, tcp://IP:порт или https://…/dns-query (DoH).</p>
+      <label>Стратегия маршрутизации
+        <select name="domain_strategy">
+          <option value="auto">Авто (рекомендуется)</option>
+          <option value="AsIs">AsIs — только по доменам</option>
+          <option value="IPIfNonMatch">IPIfNonMatch — по IP, если домен не подошёл</option>
+          <option value="IPOnDemand">IPOnDemand — всегда узнавать IP</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" name="dns_ipv6" /> Разрешить IPv6 (только если у провайдера и сервера он есть)</label>
+      <label>Свои записи DNS — «домен IP» по строке
+        <textarea name="hosts" rows="3" spellcheck="false" placeholder="router.lan 192.168.1.1&#10;nas.home 192.168.1.10"></textarea>
+      </label>
+
+      <h3>Защита</h3>
+      <label class="check"><input type="checkbox" name="encrypt_state" /> Шифровать пароли серверов на этом компе</label>
+      <p class="hint">state.json (сервера, подписки) шифруется ключом твоей учётки Windows: украденный или
+        случайно отправленный файл, облако, флешка, другая учётка — его не прочитают. От вируса, который уже
+        работает под твоей учёткой, это не спасает. Минус: просто скопировать папку на другой комп больше
+        нельзя — переноси через «Сохранить бэкап».</p>
+
+      <h3>Бэкап и перенос</h3>
+      <div class="btn-row">
+        <button type="button" class="ghost small" id="btn-backup-save">Сохранить бэкап</button>
+        <button type="button" class="ghost small" id="btn-backup-load">Восстановить</button>
+        <button type="button" class="ghost small" id="btn-v2rayn">Импорт из v2rayN</button>
+      </div>
+      <p class="hint">В бэкапе всё: сервера, подписки, правила, настройки — <b>и пароли от серверов</b>, никому его не
+        отправляй. Для v2rayN выбери файл <code>guiConfigs\guiNDB.db</code> в его папке: перенесу подписки и сервера,
+        добавленные вручную.</p>
+
+      <h3>Ядро Xray</h3>
+      <div class="core-row">
+        <span class="core-state" id="core-state"></span>
+        <button type="button" class="ghost small" id="btn-core-dl">Скачать / обновить</button>
+        <button type="button" class="ghost small" id="btn-core-dir">Открыть папку</button>
+      </div>
+      <p class="hint mono" id="core-dir"></p>
+
+      <h3>Обновления rxvpn</h3>
+      <div class="core-row">
+        <span class="core-state" id="upd-state">—</span>
+        <button type="button" class="ghost small" id="btn-upd-check">Проверить</button>
+        <button type="button" class="primary small hidden" id="btn-upd-apply">Обновить</button>
+      </div>
+      <p class="hint" id="upd-hint">Раз в день rxvpn сам смотрит новую версию на GitHub. Ставится только по кнопке:
+        перед заменой сверяются подпись автора, хеш и что версия новее текущей.</p>
+
+      <div class="dlg-actions">
+        <button type="button" class="ghost" value="cancel" id="btn-settings-cancel">Отмена</button>
+        <button type="submit" class="primary" value="save">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Свои сайты -->
+  <dialog id="dlg-sites">
+    <form method="dialog" class="dlg" id="form-sites">
+      <h2>Свои сайты</h2>
+      <p class="hint">По одному на строку: сайт (поддомены входят), ссылка целиком, IP или подсеть.
+        Строки с # — комментарии. Работает в любом режиме маршрутизации.</p>
+      <label>Напрямую, без VPN
+        <textarea name="direct" rows="7" spellcheck="false" placeholder="sberbank.ru&#10;https://госуслуги.рф&#10;my-work-portal.com&#10;95.163.0.0/16"></textarea>
+      </label>
+      <label>Всегда через VPN
+        <textarea name="proxy" rows="5" spellcheck="false" placeholder="some-site.ru&#10;45.12.0.0/16"></textarea>
+      </label>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-sites-cancel">Отмена</button>
+        <button type="submit" class="primary">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Свои сайты гибрида -->
+  <dialog id="dlg-hyb">
+    <form method="dialog" class="dlg" id="form-hyb">
+      <h2>Свои сайты мимо VPN</h2>
+      <p class="hint">Эти сайты идут напрямую, а «замедлялку» провайдера для них обходит zapret. По одному на строку:
+        site.com (поддомены входят) или ссылка целиком. IP и geosite нельзя — zapret узнаёт сайт по имени.</p>
+      <textarea id="hyb-sites" rows="7" spellcheck="false" placeholder="kick.com&#10;https://rutracker.org"></textarea>
+      <div class="dlg-actions">
+        <span class="grow"></span>
+        <button type="button" class="ghost" id="btn-hyb-cancel">Отмена</button>
+        <button type="submit" class="primary">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Tor -->
+  <dialog id="dlg-tor">
+    <form method="dialog" class="dlg" id="form-tor">
+      <h2>Tor</h2>
+      <p class="hint">Tor встроен в rxvpn (Arti) и подключается к сети Tor через твой VPN: провайдер видит только VPN,
+        VPN-сервер — что ты в Tor, сайт — выходной узел Tor. Работает только при подключённом VPN. Медленнее обычного,
+        через Tor идёт только TCP (звонки, игры и QUIC — нет).</p>
+      <label>Что через Tor
+        <select id="tor-mode">
+          <option value="off">Выключен</option>
+          <option value="onion">Только сайты .onion</option>
+          <option value="sites">.onion и сайты из списка</option>
+          <option value="all">Всё через Tor</option>
+        </select>
+      </label>
+      <label id="tor-sites-row">Сайты через Tor — по одному на строку
+        <textarea id="tor-sites" rows="5" spellcheck="false" placeholder="check.torproject.org&#10;example.com"></textarea>
+      </label>
+      <label class="check"><input type="checkbox" id="tor-isolate" /> У каждого сайта своя цепочка Tor (сайты не связать
+        между собой по выходному узлу)</label>
+      <p class="hint" id="tor-status"></p>
+      <p class="hint">В «Всё через Tor» DNS-запросы программ в режиме «Весь комп» идут через VPN, не через Tor.
+        Для анонимности лучше Tor Browser: браузер сам по себе выдаёт много лишнего.</p>
+      <div class="dlg-actions">
+        <span class="grow"></span>
+        <button type="button" class="ghost" id="btn-tor-cancel">Отмена</button>
+        <button type="submit" class="primary">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Белые списки -->
+  <dialog id="dlg-wl">
+    <form method="dialog" class="dlg" id="form-wl">
+      <h2>Белые списки</h2>
+      <p class="hint">На мобильном интернете бывает режим белых списков: открываются только госуслуги, банки, Яндекс,
+        VK и т.п., остальное и обычные VPN-серверы — нет. Если VPN перестал отвечать, rxvpn проверит напрямую: открываются
+        только разрешённые сайты — значит, это белые списки. Тогда он переключится на сервер ниже (его ты добываешь
+        сам — обычно каскад через российский сервер на «белом» адресе) и вернётся обратно, когда режим кончится.</p>
+      <label>Сервер для белых списков
+        <select id="wl-server"></select>
+      </label>
+      <label class="check"><input type="checkbox" id="wl-auto" /> Замечать и переключаться самому</label>
+      <p class="hint" id="wl-status"></p>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-wl-check">Проверить сейчас</button>
+        <span class="grow"></span>
+        <button type="button" class="ghost" id="btn-wl-cancel">Отмена</button>
+        <button type="submit" class="primary">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Программы -->
+  <dialog id="dlg-apps">
+    <div class="dlg">
+      <h2>Программы</h2>
+      <div class="seg" id="seg-apps">
+        <button data-mode="except">Все через VPN, кроме…</button>
+        <button data-mode="only">Только эти через VPN</button>
+      </div>
+      <p class="hint" id="apps-hint"></p>
+      <textarea id="apps-text" rows="6" spellcheck="false" placeholder="steam.exe&#10;cs2.exe&#10;D:\Games\"></textarea>
+      <div class="proc-head">
+        <span class="label">Запущенные программы</span>
+        <input id="proc-filter" placeholder="поиск" spellcheck="false" />
+        <button class="ghost small" id="btn-proc-refresh" title="Обновить">↻</button>
+      </div>
+      <div class="proc-list" id="proc-list"></div>
+      <p class="hint">Лучше всего работает в режиме TUN. В режиме «Прокси» действует только на программы,
+        которые сами ходят через системный прокси (браузеры, Telegram, Discord). Можно указать папку — D:\Games\ — тогда правило для всех программ в ней.</p>
+      <div class="dlg-actions">
+        <button class="ghost" id="btn-apps-cancel">Отмена</button>
+        <button class="primary" id="btn-apps-save">Сохранить</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Правила -->
+  <dialog id="dlg-rules">
+    <div class="dlg rules-dlg">
+      <h2>Правила маршрутизации</h2>
+      <p class="hint">Проверяются сверху вниз и раньше «Своих сайтов» и «Программ» — первое подошедшее решает.
+        В одном правиле все заполненные условия должны совпасть одновременно (сайт <b>и</b> программа <b>и</b> порт).</p>
+      <div class="rules-toolbar">
+        <button class="primary small" id="btn-rule-add">+ Правило</button>
+        <select id="rule-preset"><option value="">+ Из шаблона…</option></select>
+      </div>
+      <div class="rules-list" id="rules-list"></div>
+
+      <h3>Списки блокировок · для «Только блок.»</h3>
+      <div class="core-row">
+        <span class="core-state" id="lists-state"></span>
+        <button class="ghost small" id="btn-lists-update">Обновить сейчас</button>
+      </div>
+      <label class="inline-num">Обновлять сами раз в <input type="number" id="lists-days" min="0" max="60" /> дн. <span class="hint">(0 — только вручную)</span></label>
+      <p class="hint">Источник — runetfreedom (antifilter + re:filter), обновляется каждые 6 часов. Качается ~90 МБ, на диске остаётся ~3 МБ.</p>
+
+      <div class="dlg-actions">
+        <button class="ghost" id="btn-rules-cancel">Отмена</button>
+        <button class="primary" id="btn-rules-save">Сохранить</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Права администратора для TUN -->
+  <dialog id="dlg-admin">
+    <div class="dlg">
+      <h2>Нужны права администратора</h2>
+      <p id="admin-why">TUN создаёт в Windows виртуальный сетевой адаптер — без прав администратора это нельзя.
+        rxvpn перезапустится, Windows спросит разрешение, и сразу подключится.</p>
+      <p class="hint">Чтобы не спрашивало каждый раз: правой кнопкой по rxvpn.exe → Свойства →
+        Совместимость → «Запускать эту программу от имени администратора».</p>
+      <div class="dlg-actions">
+        <button class="ghost" id="btn-admin-no">Остаться в режиме прокси</button>
+        <button class="primary" id="btn-admin-yes">Перезапустить</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Zapret -->
+  <dialog id="dlg-zapret">
+    <div class="dlg zapret-dlg">
+      <h2>Zapret · без VPN</h2>
+      <p class="hint">Обход замедления YouTube и блокировки Discord прямо у провайдера — без VPN-сервера.
+        Стратегии Flowseal уже внутри rxvpn: просто нажми «Подобрать лучшую». Движок (winws и драйвер WinDivert)
+        при первом запуске скачается с официального GitHub bol-van/zapret, со сверкой хеша.</p>
+      <div class="z-source">
+        <div class="z-src-text">
+          <div class="z-src-title" id="z-src-title">Стратегии Flowseal</div>
+          <div class="z-src-meta" id="z-dir">встроены в rxvpn</div>
+        </div>
+        <div class="btn-row">
+          <button class="small" id="btn-z-update" title="Последний релиз Flowseal с GitHub">Обновить</button>
+          <button class="small hidden" id="btn-z-builtin" title="Вернуться к стратегиям rxvpn">Встроенные</button>
+          <button class="small" id="btn-z-folder" title="Свои стратегии: папка Flowseal или zapret-win-bundle">Своя папка…</button>
+        </div>
+      </div>
+      <p class="hint" id="z-engine"></p>
+      <p class="hint bad hidden" id="z-warn"></p>
+      <label class="check"><input type="checkbox" id="z-game" /> Игровой фильтр — ещё и порты 1024–65535 (для игр)</label>
+      <label class="check"><input type="checkbox" id="z-auto" /> Следить, что работает, и подбирать заново, если перестало</label>
+
+      <div class="chk-head"><h3>Стратегии</h3><button class="primary small" id="btn-z-test">Подобрать лучшую</button></div>
+      <div class="z-progress hidden" id="z-progress">
+        <progress id="z-bar" max="1" value="0"></progress>
+        <span id="z-prog-text">Готовлю…</span>
+        <button class="ghost small" id="btn-z-stop">Стоп</button>
+      </div>
+      <div class="z-base hidden" id="z-base"></div>
+      <div class="z-list" id="z-list"></div>
+      <p class="hint" id="z-skipped"></p>
+
+      <label>Свои сайты для проверки — по одному на строку (к YouTube и Discord)
+        <textarea id="z-targets" rows="2" spellcheck="false" placeholder="rutracker.org&#10;https://instagram.com"></textarea>
+      </label>
+      <p class="hint">Подбор включает каждую стратегию на пару секунд и открывает сайты по TLS 1.3, TLS 1.2 и HTTP —
+        около 10 секунд на стратегию. VPN на это время выключается. Сайт не открывается даже с zapret — возможно,
+        провайдер подменяет DNS: включи «Обход → DNS без подмены» (или «Безопасный DNS» в браузере).</p>
+      <div class="dlg-actions">
+        <button class="primary" id="btn-z-close">Готово</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- QR -->
+  <dialog id="dlg-qr">
+    <div class="dlg qr-dlg">
+      <h2 id="qr-title">QR-код</h2>
+      <div class="qr-box" id="qr-box"></div>
+      <p class="hint" id="qr-hint">Открой на телефоне v2rayNG, v2RayTun или Happ → «+» → сканировать QR.</p>
+      <div class="dlg-actions">
+        <button class="primary" id="btn-qr-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Папка для своих серверов / переименование папки или подписки -->
+  <dialog id="dlg-folder">
+    <form method="dialog" class="dlg" id="form-folder">
+      <h2 id="folder-title">Папка</h2>
+      <p class="hint" id="folder-hint"></p>
+      <input id="folder-name" maxlength="60" autocomplete="off" spellcheck="false" placeholder="Например: Мой VPS" />
+      <div class="chips" id="folder-chips"></div>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-folder-none">Без папки</button>
+        <span class="grow"></span>
+        <button type="button" class="ghost" id="btn-folder-cancel">Отмена</button>
+        <button type="submit" class="primary">Готово</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Фильтры: страны и слова подписки + общие -->
+  <dialog id="dlg-filter">
+    <form method="dialog" class="dlg" id="form-filter">
+      <h2 id="filter-title">Фильтры</h2>
+      <div id="filter-sub">
+        <p class="hint">В списке и трее останутся только эти сервера подписки — из них же выбирают «Авто» и
+          «Скорость всех». Обновление подписки фильтр не сбрасывает. Пусто — показывать все.</p>
+        <label class="label" for="filter-cc">Страны</label>
+        <input id="filter-cc" maxlength="400" autocomplete="off" spellcheck="false" placeholder="NL, DE или Нидерланды, Германия" />
+        <div class="chips" id="filter-chips"></div>
+        <label class="label" for="filter-words">Слова в названии</label>
+        <input id="filter-words" maxlength="800" autocomplete="off" spellcheck="false" placeholder="premium -test  (с минусом — без этого слова)" />
+      </div>
+      <h3 class="sec">Для всех серверов</h3>
+      <label class="check"><input type="checkbox" id="filter-dead" /> Скрыть мёртвые — не ответили на последней проверке</label>
+      <label class="check"><input type="checkbox" id="filter-dedup" /> Убрать дубли — один и тот же сервер из разных подписок</label>
+      <p class="hint">Выбранный сервер не скрывается никогда. «Проверить все» проверяет и мёртвых — ожившие вернутся.
+        Метка «мёртвый» живёт сутки; если мёртвыми оказались все (пропал интернет) — не скрывается никто.</p>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-filter-reset">Сбросить</button>
+        <span class="grow"></span>
+        <button type="button" class="ghost" id="btn-filter-cancel">Отмена</button>
+        <button type="submit" class="primary">Готово</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- WARP поверх сервера -->
+  <dialog id="dlg-warp">
+    <form method="dialog" class="dlg" id="form-warp">
+      <h2 id="warp-title">WARP</h2>
+      <p class="hint">rxvpn заведёт бесплатную учётку Cloudflare WARP и добавит сервер «WARP · …»: трафик идёт
+        через этот сервер, а дальше — через Cloudflare. Провайдер видит только твой сервер, сайты — адрес Cloudflare.
+        Удобно для сервисов, которые не пускают с адресов хостеров. Скорость — как у сервера или чуть ниже.</p>
+      <p class="hint">Ключ WARP хранится вместе с серверами (в бэкапе тоже). Ссылки для телефона у WARP нет.</p>
+      <label class="check"><input type="checkbox" id="warp-direct" /> Напрямую, без сервера — только попробовать:
+        в России WireGuard обычно режут</label>
+      <div class="dlg-actions">
+        <span class="grow"></span>
+        <button type="button" class="ghost" id="btn-warp-cancel">Отмена</button>
+        <button type="submit" class="primary" id="btn-warp-ok">Добавить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Свой сервер: установка -->
+  <dialog id="dlg-vps">
+    <form method="dialog" class="dlg" id="form-vps">
+      <h2>Свой сервер</h2>
+      <p class="hint">rxvpn сам поставит на твой VPS VPN (официальный Xray, VLESS + Reality) и закроет сервер:
+        вход только по ключу, ufw, fail2ban, автообновления. Нужна чистая Ubuntu 22.04 / 24.04 или Debian 12,
+        вход root и свободный порт 443. Пароль используется один раз и нигде не сохраняется.
+        После установки вход по паролю выключится — останется ключ rxvpn: сразу сохрани его
+        кнопкой «Сохранить ключ SSH» у сервера (переустановишь Windows — без него не войти).</p>
+      <div class="vps-form" id="vps-step1">
+        <label>IP или адрес сервера
+          <input id="vps-host" maxlength="253" autocomplete="off" spellcheck="false" placeholder="203.0.113.10" />
+        </label>
+        <label>Порт SSH
+          <input id="vps-port" type="number" min="1" max="65535" value="22" />
+        </label>
+        <label>Название (как будет в списке)
+          <input id="vps-name" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Например: Нидерланды" />
+        </label>
+        <label>Пароль root
+          <input id="vps-pass" type="password" autocomplete="off" spellcheck="false" />
+        </label>
+        <details>
+          <summary class="hint">Вместо пароля — SSH-ключ</summary>
+          <label>Закрытый ключ (OpenSSH, PEM или PuTTY)
+            <textarea id="vps-key" rows="4" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+          </label>
+          <label>Пароль от ключа (если есть)
+            <input id="vps-keypass" type="password" autocomplete="off" />
+          </label>
+        </details>
+      </div>
+      <div class="vps-form hidden" id="vps-step2">
+        <p>Отпечаток ключа сервера:</p>
+        <code class="fp" id="vps-fp"></code>
+        <p class="hint">Сверь с сервером: в веб-консоли хостера выполни
+          <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> — первая часть строки должна совпасть.
+          Не совпадает — не продолжай: между тобой и сервером кто-то есть. Дальше rxvpn сверяет этот отпечаток сам.</p>
+        <label class="check"><input type="checkbox" id="vps-trust" /> Это мой сервер</label>
+      </div>
+      <p class="hint" id="vps-status"></p>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-vps-cancel">Отмена</button>
+        <button type="submit" class="primary" id="btn-vps-next">Дальше</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Свой сервер: управление -->
+  <dialog id="dlg-vpsman">
+    <div class="dlg">
+      <h2 id="vm-title">Сервер</h2>
+      <div class="vm-info" id="vm-info"></div>
+      <div class="btn-row">
+        <button type="button" class="ghost small" id="btn-vm-qr">QR для телефона</button>
+        <button type="button" class="ghost small" id="btn-vm-copy">Копировать ссылку</button>
+        <button type="button" class="ghost small" id="btn-vm-update">Обновить Xray</button>
+        <button type="button" class="ghost small" id="btn-vm-restart">Перезапустить</button>
+        <button type="button" class="ghost small" id="btn-vm-traffic">Трафик</button>
+        <button type="button" class="ghost small" id="btn-vm-key" title="Без него при переустановке Windows в сервер не попасть">Сохранить ключ SSH</button>
+      </div>
+      <h3 class="vm-sub">Друзья</h3>
+      <p class="hint">У каждого — своя ссылка. Отключить — одним кликом, остальных это не трогает.
+        Трафик считается с последнего перезапуска Xray на сервере.</p>
+      <div class="friend-list" id="vm-friends"></div>
+      <form class="friend-add" id="form-friend">
+        <input id="friend-name" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Имя друга" />
+        <button type="submit" class="primary small">+ Друг</button>
+      </form>
+      <p class="hint" id="vm-status"></p>
+      <div class="dlg-actions">
+        <button type="button" class="ghost danger" id="btn-vm-remove">Удалить с сервера</button>
+        <button type="button" class="ghost" id="btn-vm-forget" title="Сервер не трогать, только убрать из rxvpn">Убрать из списка</button>
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-vm-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Почему не открывается сайт -->
+  <dialog id="dlg-diag">
+    <form method="dialog" class="dlg" id="form-diag">
+      <h2>Почему не открывается сайт</h2>
+      <p class="hint">Проверю, что с ним сделал провайдер: подменил адрес, заблокировал по IP, режет по имени
+        или замедляет, — и скажу, что включить.</p>
+      <div class="diag-input">
+        <input id="diag-site" autocomplete="off" spellcheck="false" placeholder="например, site.com или https://site.com/page" />
+        <button type="submit" class="primary" id="btn-diag-run">Проверить</button>
+      </div>
+      <ul class="diag-steps" id="diag-steps"></ul>
+      <div class="diag-verdict hidden" id="diag-verdict">
+        <div class="diag-title" id="diag-title"></div>
+        <p class="hint" id="diag-advice"></p>
+        <div class="diag-actions" id="diag-actions">
+          <button type="button" class="primary hidden" data-act="vpn">Пускать через VPN</button>
+          <button type="button" class="primary hidden" data-act="zapret">Обходить через zapret</button>
+          <button type="button" class="primary hidden" data-act="direct">Пускать напрямую</button>
+        </div>
+      </div>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-diag-close">Закрыть</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Сервисы через сервер -->
+  <dialog id="dlg-svc">
+    <div class="dlg">
+      <h2 id="svc-title">Сервисы</h2>
+      <p class="hint" id="svc-land"></p>
+      <ul class="diag-steps svc-list" id="svc-list"></ul>
+      <p class="hint">Обычные запросы, как из браузера, без входа в аккаунты. Сервисы иногда меняют свои страницы —
+        тогда будет «не понять»: это значит, что проверить не вышло, а не что не работает.</p>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-svc-again">Проверить снова</button>
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-svc-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- На телефон -->
+  <dialog id="dlg-phone">
+    <div class="dlg qr-dlg">
+      <h2>На телефон</h2>
+      <p class="hint"><b>1. Сервера.</b> Вкладка «Сервера» → QR у подписки или у сервера → в Happ «+» → сканировать.</p>
+      <p class="hint"><b>2. Маршруты как на компе.</b> Наведи камеру iPhone на код и нажми «Открыть в Happ» —
+        включится профиль «rxvpn»: <span id="phone-mode"></span>, твои «Свои сайты» и блокировка рекламы.
+        «Сайт → свой сервер» Happ не умеет — эти сайты пойдут просто через VPN.</p>
+      <div class="qr-box" id="phone-qr"></div>
+      <p class="hint hidden" id="phone-long">Ссылка длинная для камеры. Нажми «Скопировать», отправь себе
+        в Telegram («Избранное») и нажми на неё на телефоне.</p>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-phone-copy">Скопировать ссылку</button>
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-phone-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Профили по сети -->
+  <dialog id="dlg-net">
+    <form method="dialog" class="dlg" id="form-net">
+      <h2>Профили по сети</h2>
+      <label class="check switch-row"><input type="checkbox" id="net-on" /> Включить</label>
+      <p class="hint" id="net-now">Смотрю, где ты…</p>
+      <div class="btn-row"><button type="button" class="ghost small" id="btn-net-trust">Это моя сеть</button></div>
+      <div class="ss-list" id="net-list"></div>
+      <h3>В своих сетях</h3>
+      <div class="net-row">
+        <select id="net-home-route"></select>
+        <select id="net-home-vpn"></select>
+      </div>
+      <h3>В остальных сетях (кафе, работа, кабель, телефон)</h3>
+      <div class="net-row">
+        <select id="net-away-route"></select>
+        <select id="net-away-vpn"></select>
+      </div>
+      <p class="hint">Срабатывает, когда сеть меняется; что переключишь руками — держится до следующей смены.
+        Своя сеть узнаётся по имени Wi-Fi <b>и</b> адресу точки доступа: поддельная точка с таким же именем
+        считается чужой. Несколько точек дома (mesh) — нажми «Это моя сеть» у каждой.
+        Windows 11 отдаёт имя Wi-Fi, только если включено «Параметры → Конфиденциальность → Расположение →
+        Разрешить классическим приложениям доступ к расположению».</p>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-net-cancel">Отмена</button>
+        <button type="submit" class="primary">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Подобрать обход для сервера -->
+  <dialog id="dlg-tweak">
+    <div class="dlg">
+      <h2 id="tweak-title">Обход</h2>
+      <p class="hint" id="tweak-note">Пробую варианты разом: без обхода, нарезку первого пакета, другой отпечаток браузера.
+        Первый рабочий (самый незаметный) запомню для этого сервера. Подключение не трогаю.</p>
+      <ul class="diag-steps svc-list" id="tweak-list"></ul>
+      <div class="diag-verdict hidden" id="tweak-verdict"><div class="diag-title" id="tweak-res"></div></div>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-tweak-reset">Сбросить подобранное</button>
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-tweak-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Сайт → свой сервер -->
+  <dialog id="dlg-sitesrv">
+    <div class="dlg">
+      <h2>Сайт → свой сервер</h2>
+      <p class="hint">Эти сайты всегда идут через выбранный сервер, остальное — как обычно. Например, ChatGPT — через
+        американский, YouTube — через голландский. Действует в любом режиме и главнее «Своих сайтов».
+        Подойдёт ли сервер — кнопка «Сервисы» у него в списке.</p>
+      <div class="ss-list" id="ss-list"></div>
+      <div class="rules-toolbar">
+        <button type="button" class="primary small" id="btn-ss-add">+ Правило</button>
+        <select id="ss-preset"><option value="">+ Для сервиса…</option></select>
+      </div>
+      <form class="ss-edit hidden" id="form-ss">
+        <label>Название
+          <input id="ss-name" maxlength="60" autocomplete="off" spellcheck="false" placeholder="Например: ChatGPT" />
+        </label>
+        <label>Через сервер
+          <select id="ss-server"></select>
+        </label>
+        <label>Запасной — если основной не отвечает (необязательно)
+          <select id="ss-backup"></select>
+        </label>
+        <label>Сайты — по одному на строку (поддомены входят), IP или подсеть
+          <textarea id="ss-sites" rows="5" spellcheck="false" placeholder="chatgpt.com&#10;openai.com"></textarea>
+        </label>
+        <div class="dlg-actions">
+          <button type="button" class="ghost danger" id="btn-ss-del">Удалить</button>
+          <span class="grow"></span>
+          <button type="button" class="ghost" id="btn-ss-cancel">Отмена</button>
+          <button type="submit" class="primary">Сохранить</button>
+        </div>
+      </form>
+      <div class="dlg-actions" id="ss-close-row">
+        <button type="button" class="primary" id="btn-ss-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Проверка подключения: IP, DNS, скорость -->
+  <dialog id="dlg-checks">
+    <div class="dlg">
+      <h2 id="checks-title">Проверка подключения</h2>
+
+      <div id="chk-sec-ip">
+      <div class="chk-head"><h3>IP-адрес</h3><button type="button" class="ghost small" id="btn-ip-run">Обновить</button></div>
+      <div class="ip-cards" id="ip-cards"><p class="hint">Нажми «Обновить» — покажу, с какого IP и из какой страны тебя видят сайты.</p></div>
+
+      <div class="chk-head"><h3>Утечка DNS</h3><button type="button" class="ghost small" id="btn-dns-run">Проверить</button></div>
+      <div class="dns-out" id="dns-out"><p class="hint">Кто видит, какие сайты ты открываешь (DNS-запросы). Около 10 секунд.</p></div>
+      </div>
+
+      <div id="chk-sec-speed">
+      <div class="chk-head"><h3>Скорость</h3><button type="button" class="ghost small" id="btn-speed-run">Запустить</button></div>
+      <div class="sp-cards">
+        <div><span class="lbl">↓ скачивание</span><b id="st-down">—</b></div>
+        <div><span class="lbl">↑ загрузка</span><b id="st-up">—</b></div>
+      </div>
+      <p class="hint" id="st-meta">Около 15 секунд, до 250 МБ трафика. Сервер — Cloudflare.</p>
+      </div>
+
+      <div class="dlg-actions"><button class="primary" id="btn-checks-close">Закрыть</button></div>
+    </div>
+  </dialog>
+
+  <!-- Просмотр конфига -->
+  <dialog id="dlg-config">
+    <div class="dlg wide">
+      <h2>config.json для Xray</h2>
+      <pre class="code" id="config-json"></pre>
+      <div class="dlg-actions">
+        <button class="primary" id="btn-config-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Сервер DoH для «DNS без подмены» -->
+  <dialog id="dlg-doh">
+    <div class="dlg">
+      <h2>Сервер DoH</h2>
+      <p class="hint">Куда rxvpn отправляет DNS-запросы по HTTPS в режиме «Без VPN». Сертификат сервера проверяется.</p>
+      <div class="nav-list">
+        <label class="check switch-row nav-switch"><input type="radio" name="doh-p" value="cloudflare" /> Cloudflare · 1.1.1.1</label>
+        <label class="check switch-row nav-switch"><input type="radio" name="doh-p" value="google" /> Google · 8.8.8.8</label>
+        <label class="check switch-row nav-switch"><input type="radio" name="doh-p" value="custom" /> Свой</label>
+      </div>
+      <label>Адрес своего DoH<input id="doh-url" type="text" maxlength="300" spellcheck="false" autocomplete="off"
+        placeholder="https://dns.example.com/dns-query" /></label>
+      <p class="hint">Например, NextDNS или AdGuard DNS со своей ссылкой. Только https://. Адрес по имени ищется один раз
+        при включении — через DNS Windows, до того как его поменяет rxvpn.</p>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-doh-cancel">Отмена</button>
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-doh-save">Сохранить</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Сообщить о проблеме: отчёт без секретов -->
+  <dialog id="dlg-report">
+    <div class="dlg wide">
+      <h2>Сообщить о проблеме</h2>
+      <p class="hint">Версии, режим, маршруты, последние проверки и 200 строк лога. Пароли, UUID, ссылки серверов
+        и подписок, адреса серверов, твой IP, секрет Telegram-прокси, ключи WARP и имя пользователя вырезаны —
+        проверь глазами и отправь тому, кто помогает (чат, issue на GitHub).</p>
+      <pre class="code report-text" id="report-text">Собираю…</pre>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-report-copy">Скопировать</button>
+        <button type="button" class="ghost" id="btn-report-save">Сохранить в файл</button>
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-report-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast"><span id="toast-text"></span><button type="button" class="ghost small hidden" id="toast-report">Сообщить о проблеме</button></div>
+
+  <script src="locales/en.js"></script>
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- rxvpn: K2 — белая пирамида на чёрном. Оригинальный рисунок. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26262a"/>
+      <stop offset="1" stop-color="#050505"/>
+    </linearGradient>
+    <linearGradient id="lit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7c7c82"/>
+      <stop offset="1" stop-color="#6a6a70"/>
+    </linearGradient>
+    <linearGradient id="shade" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5c5c62"/>
+      <stop offset="1" stop-color="#48484d"/>
+    </linearGradient>
+    <clipPath id="sq"><rect width="1024" height="1024" rx="228"/></clipPath>
+  </defs>
+  <g clip-path="url(#sq)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <path fill="#2a2a2e" d="M0 1024V770l86-46 74 30 90-70 62 36 50-26V1024zM700 1024V720l62-34 70 40 84-66 66 44 42-18V1024z"/>
+    <path fill="url(#lit)" d="M0 1024V812l120-72 90-80 70-60 50-80 42-50 28-60 40-50 30-60 42-70 42 60 26 40 38 30 48 12 40 48 42 80 58 70 80 80 144 110V1024z"/>
+    <path fill="url(#shade)" d="M512 230l42 60 26 40 38 30 48 12 40 48 42 80 58 70 80 80 144 110V1024H648l-28-170 10-150-46-170-28-150z"/>
+  </g>
+</svg>

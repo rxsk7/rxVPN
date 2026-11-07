@@ -1,0 +1,30 @@
+[package]
+name = "rxvpn"
+version = "0.11.0"
+edition = "2021"
+description = "rxvpn — клиент для VLESS/VMess/Trojan/Shadowsocks на Xray"
+
+[lib]
+name = "rxvpn_lib"
+# Для ПК хватает rlib. Для Android/iOS понадобятся "staticlib", "cdylib" —
+# но под Windows cdylib не линкуется: у DLL больше 65535 экспортов.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rxvpn-core = { path = "../core", features = ["tor"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tokio = { version = "1", features = ["time", "macros", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+arboard = "3"
+dirs = "6"
+tauri-plugin-dialog = "2"
+zeroize = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7"
+winreg = "0.55"

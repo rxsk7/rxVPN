@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["core", "src-tauri", "i18n-macros"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
