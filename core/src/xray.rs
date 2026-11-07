@@ -86,6 +86,9 @@ pub struct Settings {
     pub proxy: Vec<String>,
     /// TUN: весь трафик компа (игры, любые программы) через VPN. Нужны права админа.
     pub tun: bool,
+    /// Kill switch в TUN: упал Xray — интернет закрыт, пока VPN не вернётся или не нажмут
+    /// «Отключить» (core/src/killswitch.rs). Только с правами администратора.
+    pub kill_switch: bool,
     /// Запускаться вместе с Windows (свёрнутым в трей).
     pub autostart: bool,
     /// Подключаться к выбранному серверу сразу при запуске программы.
@@ -524,6 +527,7 @@ impl Default for Settings {
             direct: Vec::new(),
             proxy: Vec::new(),
             tun: false,
+            kill_switch: false,
             autostart: false,
             auto_connect: false,
             close_to_tray: true,
@@ -1458,6 +1462,9 @@ pub fn build_run_config(up: &Upstream, s: &Settings, o: &RunOpts) -> Value {
             mask_outbound(o, tweak, global.as_ref());
         }
     }
+    if s.tun && s.kill_switch {
+        resolve_servers_inside(&mut cfg, s);
+    }
     if let Some(port) = o.metrics_port {
         cfg["stats"] = json!({});
         cfg["policy"] = json!({
@@ -1484,6 +1491,31 @@ pub fn build_run_config(up: &Upstream, s: &Settings, o: &RunOpts) -> Value {
         });
     }
     cfg
+}
+
+/// Kill switch: адрес сервера Xray узнаёт своим DNS (`dns_section` отдаёт адреса серверов
+/// «напрямую» — это соединения самого xray.exe, kill switch их пускает), а не системным
+/// DNS Windows. Системный DNS при kill switch ходит только через туннель — а при
+/// перезапуске Xray («Авто», смена сервера) туннеля ещё нет, и VPN бы не поднялся.
+fn resolve_servers_inside(cfg: &mut Value, s: &Settings) {
+    const SERVERS: &[&str] = &["vless", "vmess", "trojan", "shadowsocks", "hysteria", "hysteria2", "socks", "http"];
+    let strategy = if s.dns_ipv6 { "UseIP" } else { "UseIPv4" };
+    let Some(list) = cfg["outbounds"].as_array_mut() else { return };
+    for o in list.iter_mut() {
+        if !o["protocol"].as_str().is_some_and(|p| SERVERS.contains(&p)) || o["tag"] == "tor" {
+            continue;
+        }
+        if !o["streamSettings"].is_object() {
+            o["streamSettings"] = json!({});
+        }
+        let ss = &mut o["streamSettings"];
+        if !ss["sockopt"].is_object() {
+            ss["sockopt"] = json!({});
+        }
+        if ss["sockopt"]["domainStrategy"].is_null() {
+            ss["sockopt"]["domainStrategy"] = json!(strategy);
+        }
+    }
 }
 
 /// sniffing вытаскивает домен из TLS/HTTP — чтобы правила по доменам работали,
@@ -2115,6 +2147,21 @@ mod tests {
     /// Куда уйдёт трафик по правилу: "proxy" / "direct" / "block" / "auto"(балансировщик).
     fn dest(r: &Value) -> String {
         r["outboundTag"].as_str().or(r["balancerTag"].as_str()).unwrap_or("?").to_string()
+    }
+
+    #[test]
+    fn kill_switch_resolves_servers_inside_xray() {
+        let n = parse_link("vless://u@nl1.example.com:443?type=tcp&security=reality&pbk=K&sid=a&sni=x.com#t").unwrap();
+        let mut s = Settings { tun: true, kill_switch: true, ..Default::default() };
+        let c = build_config(&n, &s);
+        let out = |c: &Value, tag: &str| c["outbounds"].as_array().unwrap().iter().find(|o| o["tag"] == tag).unwrap().clone();
+        assert_eq!(out(&c, "proxy")["streamSettings"]["sockopt"]["domainStrategy"], "UseIPv4");
+        assert!(out(&c, "direct")["streamSettings"]["sockopt"]["domainStrategy"].is_null(), "freedom не трогаем");
+        // Адрес сервера — в «прямом» DNS Xray: его спросит сам xray.exe, kill switch его пускает.
+        assert!(c["dns"].to_string().contains("full:nl1.example.com"));
+        s.kill_switch = false;
+        let c = build_config(&n, &s);
+        assert!(out(&c, "proxy")["streamSettings"]["sockopt"]["domainStrategy"].is_null(), "без kill switch — как было");
     }
 
     fn node() -> Node {

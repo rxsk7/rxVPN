@@ -303,10 +303,23 @@ function renderHero() {
     if (lastPing) parts.push(t("{ms} мс", { ms: lastPing }));
     parts.push(fmtClock(Date.now() - connSince));
     sub = parts.join(" · ");
+  } else if (V.kill_on) {
+    // Xray упал, kill switch держит интернет закрытым.
+    sub = t("Kill switch: интернет закрыт, пока VPN не вернётся");
+    label.textContent = t("VPN упал");
+    label.classList.add("busy");
   } else sub = V.servers.length || V.settings.zapret ? t("Нажми кнопку, чтобы подключиться") : "";
   $("hero-sub").textContent = sub;
+  $("btn-kill-release").classList.toggle("hidden", !(V.kill_on && !V.connected && !busy));
 }
 setInterval(() => { if (V && connSince) renderHero(); }, 1000);
+$("btn-kill-release").onclick = async () => {
+  const v = await call("kill_release").catch(() => null);
+  if (!v) return;
+  V = v;
+  render();
+  toast(t("Блокировка снята — интернет работает без VPN"));
+};
 
 // ---------- первый запуск ----------
 function renderWelcome() {
@@ -1895,6 +1908,7 @@ function fillSettings() {
   form.http_port.value = s.http_port;
   form.system_proxy.checked = s.system_proxy;
   form.allow_lan.checked = s.allow_lan;
+  form.kill_switch.checked = !!s.kill_switch;
   form.log_level.value = s.log_level;
   form.autostart.checked = s.autostart;
   form.auto_connect.checked = s.auto_connect;
@@ -1937,6 +1951,7 @@ form.onsubmit = async (e) => {
     http_port: Number(form.http_port.value),
     system_proxy: form.system_proxy.checked,
     allow_lan: form.allow_lan.checked,
+    kill_switch: form.kill_switch.checked,
     log_level: form.log_level.value,
     autostart: form.autostart.checked,
     auto_connect: form.auto_connect.checked,

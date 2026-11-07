@@ -1,0 +1,372 @@
+//! Kill switch для режима «Весь комп» (TUN): пока он включён, в интернет выходят только
+//! туннель rxvpn, сам Xray (он и несёт туннель к серверу) и rxvpn.exe; плюс локальная сеть,
+//! loopback и DHCP. Упал Xray, пропал адаптер — программы не уйдут в интернет мимо VPN.
+//!
+//! Устроено на Windows Filtering Platform (как у Mullvad и WireGuard):
+//! * своя подуровень-«полка» фильтров на слоях ALE_AUTH_CONNECT v4/v6 (исходящие соединения
+//!   и первый UDP-пакет каждого потока);
+//! * на ней «заблокировать всё» с весом 0 и разрешения с большим весом;
+//! * разрешение для туннеля — по LUID адаптера, ставится заново после каждого запуска Xray
+//!   (`allow_interface`): адаптер пересоздаётся.
+//!
+//! Сессия WFP «динамическая»: все фильтры живут, пока открыт дескриптор движка. Закрыли
+//! rxvpn, он упал, его сняли в диспетчере задач — Windows сама убирает фильтры, и интернет
+//! не остаётся заблокированным навсегда. Нужны права администратора (как и TUN).
+
+use std::path::{Path, PathBuf};
+
+/// Локальные сети, которые kill switch не трогает: принтеры, NAS, роутер, mDNS, мультикаст.
+pub const LAN_V4: &[(u32, u32)] = &[
+    (0x0A00_0000, 0xFF00_0000), // 10.0.0.0/8
+    (0xAC10_0000, 0xFFF0_0000), // 172.16.0.0/12
+    (0xC0A8_0000, 0xFFFF_0000), // 192.168.0.0/16
+    (0xA9FE_0000, 0xFFFF_0000), // 169.254.0.0/16
+    (0xE000_0000, 0xF000_0000), // 224.0.0.0/4 мультикаст
+    (0xFFFF_FFFF, 0xFFFF_FFFF), // 255.255.255.255 broadcast
+];
+/// IPv6: link-local, unique-local, мультикаст.
+pub const LAN_V6: &[([u8; 16], u8)] = &[
+    ([0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 10),
+    ([0xfc, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 7),
+    ([0xff, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 8),
+];
+
+/// Включённый kill switch. Drop — фильтры снимаются (закрывается динамическая сессия).
+pub struct KillSwitch {
+    #[cfg(windows)]
+    inner: imp::Engine,
+    apps: Vec<PathBuf>,
+}
+
+impl std::fmt::Debug for KillSwitch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KillSwitch").field("apps", &self.apps).finish()
+    }
+}
+
+impl KillSwitch {
+    /// Включить: блок всего, кроме `apps` (полные пути к exe), локальной сети, loopback и DHCP.
+    pub fn enable(apps: &[&Path]) -> Result<Self, String> {
+        for a in apps {
+            if !a.is_absolute() || !a.is_file() {
+                return Err(tr!("kill switch: нет файла {}", a.display()));
+            }
+        }
+        #[cfg(windows)]
+        {
+            let inner = imp::Engine::open(apps)?;
+            Ok(Self { inner, apps: apps.iter().map(|p| p.to_path_buf()).collect() })
+        }
+        #[cfg(not(windows))]
+        {
+            Err(trs!("kill switch есть только в Windows").into())
+        }
+    }
+
+    /// Пустить трафик через адаптер туннеля (LUID). Прошлое разрешение для туннеля снимается.
+    pub fn allow_interface(&mut self, luid: u64) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            self.inner.allow_interface(luid)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = luid;
+            Err(trs!("kill switch есть только в Windows").into())
+        }
+    }
+
+    pub fn apps(&self) -> &[PathBuf] {
+        &self.apps
+    }
+}
+
+/// LUID сетевого адаптера по имени подключения («rxvpn» у нашего TUN). None — такого нет.
+pub fn interface_luid(alias: &str) -> Option<u64> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::NetworkManagement::IpHelper::ConvertInterfaceAliasToLuid;
+        use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
+        let w: Vec<u16> = alias.encode_utf16().chain(Some(0)).collect();
+        let mut luid: NET_LUID_LH = unsafe { std::mem::zeroed() };
+        if unsafe { ConvertInterfaceAliasToLuid(w.as_ptr(), &mut luid) } != 0 {
+            return None;
+        }
+        Some(unsafe { luid.Value })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = alias;
+        None
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use std::path::Path;
+
+    use windows_sys::core::GUID;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::*;
+
+    /// Своя «полка» фильтров rxvpn (постоянный GUID — видно в `netsh wfp show filters`).
+    const SUBLAYER: GUID = GUID::from_u128(0x7a1f_3c9e_52b4_4d0a_9e61_8c2b_5f40_d713);
+    const RPC_C_AUTHN_WINNT: u32 = 10;
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(Some(0)).collect()
+    }
+
+    fn check(what: &str, code: u32) -> Result<(), String> {
+        if code == 0 {
+            Ok(())
+        } else {
+            Err(tr!("kill switch: {what} — ошибка WFP 0x{code:08x}"))
+        }
+    }
+
+    /// Условие фильтра. Значения держит сам `Cond` (указатели внутрь живут, пока он жив).
+    enum Val {
+        U8(u8),
+        U16(u16),
+        U32(u32),
+        U64(Box<u64>),
+        V4(Box<FWP_V4_ADDR_AND_MASK>),
+        V6(Box<FWP_V6_ADDR_AND_MASK>),
+        Blob(*mut FWP_BYTE_BLOB),
+    }
+
+    struct Cond {
+        field: GUID,
+        mt: FWP_MATCH_TYPE,
+        val: Val,
+    }
+
+    impl Cond {
+        fn raw(&mut self) -> FWPM_FILTER_CONDITION0 {
+            let mut v: FWP_CONDITION_VALUE0 = unsafe { std::mem::zeroed() };
+            match &mut self.val {
+                Val::U8(x) => {
+                    v.r#type = FWP_UINT8;
+                    v.Anonymous.uint8 = *x;
+                }
+                Val::U16(x) => {
+                    v.r#type = FWP_UINT16;
+                    v.Anonymous.uint16 = *x;
+                }
+                Val::U32(x) => {
+                    v.r#type = FWP_UINT32;
+                    v.Anonymous.uint32 = *x;
+                }
+                Val::U64(x) => {
+                    v.r#type = FWP_UINT64;
+                    v.Anonymous.uint64 = &mut **x;
+                }
+                Val::V4(x) => {
+                    v.r#type = FWP_V4_ADDR_MASK;
+                    v.Anonymous.v4AddrMask = &mut **x;
+                }
+                Val::V6(x) => {
+                    v.r#type = FWP_V6_ADDR_MASK;
+                    v.Anonymous.v6AddrMask = &mut **x;
+                }
+                Val::Blob(b) => {
+                    v.r#type = FWP_BYTE_BLOB_TYPE;
+                    v.Anonymous.byteBlob = *b;
+                }
+            }
+            FWPM_FILTER_CONDITION0 { fieldKey: self.field, matchType: self.mt, conditionValue: v }
+        }
+    }
+
+    pub(super) struct Engine {
+        h: HANDLE,
+        tun: Vec<u64>,
+    }
+
+    // Дескриптор движка WFP можно использовать из любого потока (обращения — под Mutex в AppState).
+    unsafe impl Send for Engine {}
+
+    impl Engine {
+        pub(super) fn open(apps: &[&Path]) -> Result<Self, String> {
+            let mut name = wide("rxvpn kill switch");
+            let mut session: FWPM_SESSION0 = unsafe { std::mem::zeroed() };
+            session.flags = FWPM_SESSION_FLAG_DYNAMIC;
+            session.displayData.name = name.as_mut_ptr();
+            let mut h: HANDLE = std::ptr::null_mut();
+            check(trs!("движок WFP не открылся"), unsafe {
+                FwpmEngineOpen0(std::ptr::null(), RPC_C_AUTHN_WINNT, std::ptr::null(), &session, &mut h)
+            })?;
+            let mut e = Engine { h, tun: Vec::new() };
+            // Ошибка посередине — Drop закроет сессию, а с ней уйдёт и незакоммиченное.
+            check(trs!("транзакция"), unsafe { FwpmTransactionBegin0(e.h, 0) })?;
+            match e.install(apps) {
+                Ok(()) => check(trs!("применение фильтров"), unsafe { FwpmTransactionCommit0(e.h) })?,
+                Err(err) => {
+                    unsafe { FwpmTransactionAbort0(e.h) };
+                    return Err(err);
+                }
+            }
+            Ok(e)
+        }
+
+        fn install(&mut self, apps: &[&Path]) -> Result<(), String> {
+            let mut sname = wide("rxvpn");
+            let mut sub: FWPM_SUBLAYER0 = unsafe { std::mem::zeroed() };
+            sub.subLayerKey = SUBLAYER;
+            sub.displayData.name = sname.as_mut_ptr();
+            sub.weight = 0xFFFF;
+            check(trs!("своя полка фильтров"), unsafe { FwpmSubLayerAdd0(self.h, &sub, std::ptr::null_mut()) })?;
+
+            // id приложений: FwpmGetAppIdFromFileName0 выделяет память — освобождаем в конце.
+            let mut ids: Vec<*mut FWP_BYTE_BLOB> = Vec::new();
+            let res = (|| {
+                for a in apps {
+                    let w = wide(&a.to_string_lossy());
+                    let mut blob: *mut FWP_BYTE_BLOB = std::ptr::null_mut();
+                    check(trs!("id программы"), unsafe { FwpmGetAppIdFromFileName0(w.as_ptr(), &mut blob) })?;
+                    ids.push(blob);
+                }
+                for (layer, v6) in [(FWPM_LAYER_ALE_AUTH_CONNECT_V4, false), (FWPM_LAYER_ALE_AUTH_CONNECT_V6, true)] {
+                    // 1. Всё остальное — в блок.
+                    self.add(layer, 0, FWP_ACTION_BLOCK, &mut [])?;
+                    // 2. loopback (127.0.0.1, ::1 — локальные прокси rxvpn и всё, что слушает localhost).
+                    self.add(layer, 15, FWP_ACTION_PERMIT, &mut [Cond {
+                        field: FWPM_CONDITION_FLAGS,
+                        mt: FWP_MATCH_FLAGS_ALL_SET,
+                        val: Val::U32(FWP_CONDITION_FLAG_IS_LOOPBACK),
+                    }])?;
+                    // 3. Xray и rxvpn.exe: туннель к серверу и служебные проверки.
+                    for b in &ids {
+                        self.add(layer, 14, FWP_ACTION_PERMIT, &mut [Cond { field: FWPM_CONDITION_ALE_APP_ID, mt: FWP_MATCH_EQUAL, val: Val::Blob(*b) }])?;
+                    }
+                    // 4. Локальная сеть (условия с одним полем WFP складывает через «или»).
+                    let mut lan: Vec<Cond> = if v6 {
+                        super::LAN_V6
+                            .iter()
+                            .map(|(addr, p)| Cond {
+                                field: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                                mt: FWP_MATCH_EQUAL,
+                                val: Val::V6(Box::new(FWP_V6_ADDR_AND_MASK { addr: *addr, prefixLength: *p })),
+                            })
+                            .collect()
+                    } else {
+                        super::LAN_V4
+                            .iter()
+                            .map(|(addr, mask)| Cond {
+                                field: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                                mt: FWP_MATCH_EQUAL,
+                                val: Val::V4(Box::new(FWP_V4_ADDR_AND_MASK { addr: *addr, mask: *mask })),
+                            })
+                            .collect()
+                    };
+                    self.add(layer, 13, FWP_ACTION_PERMIT, &mut lan)?;
+                    // 5. DHCP — иначе адрес от роутера не продлится и сеть отвалится вовсе.
+                    self.add(layer, 13, FWP_ACTION_PERMIT, &mut [
+                        Cond { field: FWPM_CONDITION_IP_PROTOCOL, mt: FWP_MATCH_EQUAL, val: Val::U8(17) },
+                        Cond { field: FWPM_CONDITION_IP_REMOTE_PORT, mt: FWP_MATCH_EQUAL, val: Val::U16(if v6 { 547 } else { 67 }) },
+                    ])?;
+                }
+                Ok(())
+            })();
+            for mut b in ids {
+                unsafe { FwpmFreeMemory0(&mut b as *mut *mut FWP_BYTE_BLOB as *mut *mut core::ffi::c_void) };
+            }
+            res
+        }
+
+        fn add(&mut self, layer: GUID, weight: u8, action: FWP_ACTION_TYPE, conds: &mut [Cond]) -> Result<u64, String> {
+            let mut raw: Vec<FWPM_FILTER_CONDITION0> = conds.iter_mut().map(Cond::raw).collect();
+            let mut name = wide("rxvpn kill switch");
+            let mut f: FWPM_FILTER0 = unsafe { std::mem::zeroed() };
+            f.displayData.name = name.as_mut_ptr();
+            f.layerKey = layer;
+            f.subLayerKey = SUBLAYER;
+            f.weight.r#type = FWP_UINT8;
+            f.weight.Anonymous.uint8 = weight;
+            f.numFilterConditions = raw.len() as u32;
+            f.filterCondition = if raw.is_empty() { std::ptr::null_mut() } else { raw.as_mut_ptr() };
+            f.action.r#type = action;
+            let mut id = 0u64;
+            check(trs!("фильтр"), unsafe { FwpmFilterAdd0(self.h, &f, std::ptr::null_mut(), &mut id) })?;
+            Ok(id)
+        }
+
+        pub(super) fn allow_interface(&mut self, luid: u64) -> Result<(), String> {
+            check(trs!("транзакция"), unsafe { FwpmTransactionBegin0(self.h, 0) })?;
+            let r = (|| {
+                for id in std::mem::take(&mut self.tun) {
+                    // Адаптер прошлого запуска уже мог исчезнуть вместе с фильтром — не ошибка.
+                    unsafe { FwpmFilterDeleteById0(self.h, id) };
+                }
+                for layer in [FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6] {
+                    let id = self.add(layer, 12, FWP_ACTION_PERMIT, &mut [Cond {
+                        field: FWPM_CONDITION_IP_LOCAL_INTERFACE,
+                        mt: FWP_MATCH_EQUAL,
+                        val: Val::U64(Box::new(luid)),
+                    }])?;
+                    self.tun.push(id);
+                }
+                Ok(())
+            })();
+            match r {
+                Ok(()) => check(trs!("применение фильтров"), unsafe { FwpmTransactionCommit0(self.h) }),
+                Err(e) => {
+                    unsafe { FwpmTransactionAbort0(self.h) };
+                    self.tun.clear();
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    impl Drop for Engine {
+        fn drop(&mut self) {
+            // Динамическая сессия: закрыли движок — Windows убрала все наши фильтры.
+            unsafe { FwpmEngineClose0(self.h) };
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lan_ranges_are_networks() {
+        for (addr, mask) in LAN_V4 {
+            assert_eq!(addr & mask, *addr, "адрес {addr:08x} — начало своей сети");
+            assert_eq!(mask.leading_ones() + mask.trailing_zeros(), 32, "маска {mask:08x} без дыр");
+        }
+        for (addr, p) in LAN_V6 {
+            assert!(*p <= 128);
+            let full = u128::from_be_bytes(*addr);
+            let m = if *p == 0 { 0 } else { u128::MAX << (128 - *p) };
+            assert_eq!(full & m, full);
+        }
+        // Публичные адреса VPN-серверов в «локальную сеть» не попадают.
+        let inside = |ip: u32| LAN_V4.iter().any(|(a, m)| ip & m == *a);
+        assert!(!inside(0x0808_0808)); // 8.8.8.8
+        assert!(!inside(0xC633_6407)); // 198.51.100.7
+        assert!(inside(0xC0A8_0101)); // 192.168.1.1
+    }
+
+    #[test]
+    fn needs_real_files() {
+        assert!(KillSwitch::enable(&[Path::new("relative.exe")]).is_err());
+        assert!(KillSwitch::enable(&[Path::new(r"C:\definitely\missing\xray.exe")]).is_err());
+    }
+
+    /// Живой тест (нужны права администратора): включить и выключить, сеть после Drop работает.
+    #[test]
+    #[ignore]
+    fn enable_and_drop_live() {
+        let exe = std::env::current_exe().unwrap();
+        let mut ks = KillSwitch::enable(&[exe.as_path()]).expect("kill switch");
+        if let Some(l) = interface_luid("Ethernet").or_else(|| interface_luid("Wi-Fi")) {
+            ks.allow_interface(l).expect("разрешение для адаптера");
+            ks.allow_interface(l).expect("повторно — старое снимается");
+        }
+        drop(ks);
+    }
+}

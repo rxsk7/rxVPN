@@ -150,6 +150,8 @@ struct AppState {
     wl_busy: AtomicBool,
     /// Для «Всё ли в порядке»: zapret перестал пробивать; последняя проверка DNS — утечка.
     zapret_broken: AtomicBool,
+    /// Kill switch (режим «Весь комп»): фильтры WFP держатся, пока он здесь (core/src/killswitch.rs).
+    kill: Mutex<Option<rxvpn_core::killswitch::KillSwitch>>,
     dns_leak: AtomicBool,
     /// Стабильность серверов (data\stats.json) и есть ли несохранённое.
     stats: Mutex<rxvpn_core::stats::Stats>,
@@ -302,6 +304,8 @@ struct View {
     /// VPN + zapret для YouTube и Discord.
     hybrid_active: bool,
     is_windows: bool,
+    /// Kill switch включён: без VPN интернет закрыт (кроме локальной сети).
+    kill_on: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -544,6 +548,7 @@ fn view(st: &AppState) -> View {
         zapret_name,
         zapret_testing: st.ztesting.load(Ordering::SeqCst),
         is_windows: cfg!(windows),
+        kill_on: st.kill.lock().unwrap().is_some(),
         tg,
         doh,
         vps: vpsui::views(&s),
@@ -579,6 +584,66 @@ fn stop_core(st: &AppState) {
             let _ = sysproxy::disable();
         }
     }
+}
+
+/// Снять kill switch (интернет снова без ограничений). Не был включён — ничего.
+fn kill_off(app: &AppHandle, st: &AppState, why: &str) {
+    if st.kill.lock().unwrap().take().is_some() {
+        log(app, tr!("kill switch выключен: {why}"));
+    }
+}
+
+/// Включить kill switch после запуска Xray в TUN (или оставить включённым при перезапуске
+/// «Авто») и пустить через него новый адаптер туннеля, как только тот появится.
+/// С гибридом «Через zapret, мимо VPN» не включается: WinDivert отправляет пакеты заново,
+/// Windows проверяет их уже без имени программы — kill switch отрезал бы и сам Xray.
+fn kill_arm(app: &AppHandle, st: &AppState, gen: u64, hybrid: bool) {
+    if hybrid {
+        kill_off(app, st, trs!("он не работает вместе с «Через zapret, мимо VPN»"));
+        log(app, trs!("kill switch не включён: он не работает вместе с «Через zapret, мимо VPN» — выключи одно из двух"));
+        return;
+    }
+    {
+        let mut k = st.kill.lock().unwrap();
+        if k.is_none() {
+            let xray = runner::xray_path(&st.paths.core);
+            let me = match std::env::current_exe() {
+                Ok(p) => p,
+                Err(e) => return log(app, tr!("kill switch не включился: {e}")),
+            };
+            match rxvpn_core::killswitch::KillSwitch::enable(&[xray.as_path(), me.as_path()]) {
+                Ok(ks) => {
+                    *k = Some(ks);
+                    log(app, trs!("kill switch включён: без VPN программы в интернет не выйдут (локальная сеть — можно)"));
+                }
+                Err(e) => {
+                    drop(k);
+                    log(app, tr!("kill switch не включился: {e} — VPN работает без него"));
+                    let _ = app.emit("error-toast", tr!("Kill switch не включился: {e}. VPN работает без него"));
+                    return;
+                }
+            }
+        }
+    }
+    // Адаптер туннеля Xray создаёт сам — ждём его и пускаем через kill switch.
+    let a = app.clone();
+    std::thread::spawn(move || {
+        let st = a.state::<AppState>();
+        for _ in 0..80 {
+            if st.gen.load(Ordering::SeqCst) != gen {
+                return; // этот запуск уже заменили
+            }
+            if let Some(luid) = rxvpn_core::killswitch::interface_luid(rxvpn_core::xray::TUN_NAME) {
+                let r = st.kill.lock().unwrap().as_mut().map(|k| k.allow_interface(luid));
+                if let Some(Err(e)) = r {
+                    log(&a, tr!("kill switch: туннель не пропущен ({e}) — интернет закрыт, переподключись"));
+                }
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        log(&a, trs!("kill switch: адаптер туннеля не появился за 20 секунд — интернет закрыт, переподключись"));
+    });
 }
 
 /// Несколько разных свободных локальных портов (служебных).
@@ -802,8 +867,15 @@ fn start_core_ex(app: &AppHandle, st: &AppState, allow_tun: bool, how: HybridSta
                     if st.hybrid.lock().unwrap().is_some() {
                         stop_zapret(st.inner());
                     }
-                    let _ = app_exit.emit("core-exit", trs!("Ядро Xray остановилось само — смотри лог"));
-                    notify(&app_exit, trs!("rxvpn отключился"), trs!("Ядро Xray остановилось. Открой окно — причина в логе."));
+                    if st.kill.lock().unwrap().is_some() {
+                        // Kill switch держит интернет закрытым — ничего не утекает мимо VPN.
+                        log(&app_exit, trs!("kill switch: Xray остановился — интернет закрыт, пока не подключишься снова или не снимешь блокировку"));
+                        let _ = app_exit.emit("core-exit", trs!("Xray остановился. Kill switch закрыл интернет, чтобы ничего не ушло мимо VPN"));
+                        notify(&app_exit, trs!("rxvpn: интернет закрыт"), trs!("VPN упал, kill switch не пустил трафик мимо него. Подключись снова или сними блокировку в окне."));
+                    } else {
+                        let _ = app_exit.emit("core-exit", trs!("Ядро Xray остановилось само — смотри лог"));
+                        notify(&app_exit, trs!("rxvpn отключился"), trs!("Ядро Xray остановилось. Открой окно — причина в логе."));
+                    }
                     changed(&app_exit);
                 }
             },
@@ -898,6 +970,11 @@ fn start_core_ex(app: &AppHandle, st: &AppState, allow_tun: bool, how: HybridSta
     }
 
     spawn_monitor(app.clone(), info.clone());
+    if settings.tun && settings.kill_switch {
+        kill_arm(app, st, my_gen, settings.zapret_hybrid);
+    } else {
+        kill_off(app, st, trs!("режим без kill switch"));
+    }
     for r in &settings.site_servers {
         if rxvpn_core::xray::validate_site_server(r).is_ok() && !site_nodes.iter().any(|n| rxvpn_core::xray::site_server_is(r, n)) {
             if site_nodes.iter().any(|n| rxvpn_core::xray::site_backup_is(r, n)) {
@@ -1577,6 +1654,7 @@ fn start_zapret(app: &AppHandle, st: &AppState, c: &ZapretCfg) -> Res<()> {
         .cloned()
         .ok_or_else(|| tr!("Zapret: стратегии «{}» в папке больше нет — подбери заново", c.strategy))?;
     stop_core(st);
+    kill_off(app, st, trs!("режим «Без VPN»"));
     stop_zapret(st);
     let my = st.zgen.fetch_add(1, Ordering::SeqCst) + 1;
     let a = app.clone();
@@ -2172,6 +2250,7 @@ async fn zapret_test_run(app: &AppHandle, st: &AppState) -> Res<(Option<String>,
         changed(app);
     } else if is_connected(st) {
         stop_core(st);
+        kill_off(app, st, trs!("подбор zapret проверяет сайты напрямую"));
         log(app, trs!("zapret: на время подбора VPN выключен — сайты проверяю напрямую"));
         changed(app);
     }
@@ -2806,6 +2885,7 @@ fn on_tray_menu(app: &AppHandle, id: &str) {
                 let a = app.clone();
                 tauri::async_runtime::spawn(async move { dohui::doh_stop_now(&a, trs!("отключено")).await });
                 stop_core(&st);
+                kill_off(app, &st, trs!("отключено"));
                 stop_zapret(&st);
                 // После остановки: подбор, увидевший «Стоп», уже видит и смену zgen
                 // (значит, «Отключить», а не «Стоп» — ничего не включает обратно).
@@ -3040,10 +3120,19 @@ async fn connect(app: AppHandle, st: State<'_, AppState>) -> Res<View> {
     Ok(view(&st))
 }
 
+/// «Открыть интернет»: Xray упал, kill switch держит блокировку — снять её, не подключаясь.
+#[tauri::command]
+async fn kill_release(app: AppHandle, st: State<'_, AppState>) -> Res<View> {
+    kill_off(&app, &st, trs!("сняли блокировку вручную"));
+    refresh_tray(&app);
+    Ok(view(&st))
+}
+
 #[tauri::command]
 async fn disconnect(app: AppHandle, st: State<'_, AppState>) -> Res<View> {
     dohui::doh_stop_now(&app, trs!("отключено")).await;
     stop_core(&st);
+    kill_off(&app, &st, trs!("отключено"));
     stop_zapret(&st);
     // И подбор, если идёт. После остановки: см. on_tray_menu.
     st.zcancel.store(true, Ordering::SeqCst);
@@ -4070,6 +4159,7 @@ async fn import_backup(app: AppHandle, st: State<'_, AppState>) -> Res<Option<Re
     std::fs::write(&safety, copy).map_err(|e| tr!("не сохранилась страховочная копия: {e}"))?;
 
     stop_core(&st);
+    kill_off(&app, &st, trs!("восстановление бэкапа"));
     stop_zapret(&st);
     let autostart = (restored.store.settings.autostart, st.store.lock().unwrap().settings.run_as_admin);
     let mut restored = restored;
@@ -4226,8 +4316,12 @@ async fn save_settings(app: AppHandle, st: State<'_, AppState>, settings: Settin
             trs!("шифрование state.json выключено")
         });
     }
+    let kill_wanted = settings.tun && settings.kill_switch && !settings.zapret_hybrid;
     st.store.lock().unwrap().settings = settings;
     persist(&st);
+    if !kill_wanted {
+        kill_off(&app, &st, trs!("выключен в настройках"));
+    }
     if sealing {
         seal_backups(&st.paths.data.join("backups"));
     }
@@ -4531,6 +4625,7 @@ async fn apply_net_action(app: &AppHandle, act: rxvpn_core::xray::NetAction, pla
         }
         NetVpn::Off if running(&st) => {
             stop_core(&st);
+            kill_off(app, &st, trs!("профиль сети: VPN не нужен"));
             stop_zapret(&st);
             reset_auto(&st);
             log(app, tr!("сеть: {place} — отключил"));
@@ -4891,6 +4986,7 @@ pub fn run() {
         wl_prev: Mutex::new(None),
         wl_busy: AtomicBool::new(false),
         zapret_broken: AtomicBool::new(false),
+        kill: Mutex::new(None),
         dns_leak: AtomicBool::new(false),
         stats: Mutex::new(stats),
         stats_dirty: AtomicBool::new(false),
@@ -5014,6 +5110,7 @@ pub fn run() {
             speed_test,
             connect,
             disconnect,
+            kill_release,
             select_server,
             delete_server,
             import_text,

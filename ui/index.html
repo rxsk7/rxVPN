@@ -88,6 +88,7 @@
         </div>
         <div class="power-label" id="power-label">Не подключено</div>
         <div class="hero-sub" id="hero-sub">Нажми кнопку, чтобы подключиться</div>
+        <button class="ghost small hidden" id="btn-kill-release" title="Снять блокировку kill switch и пустить интернет без VPN">Открыть интернет без VPN</button>
 
         <button class="card-row" id="btn-current">
           <span class="cr-text">
@@ -380,6 +381,10 @@
       </div>
       <p class="hint">Не ставь 10808/10809 — их занимают Happ и v2rayN.</p>
       <label class="check"><input type="checkbox" name="system_proxy" /> Ставить системный прокси Windows (в режиме «Прокси»)</label>
+      <label class="check"><input type="checkbox" name="kill_switch" /> Kill switch в режиме «Весь комп»</label>
+      <p class="hint">Упал VPN — интернет закрывается, пока не подключишься снова: ни одна программа не уйдёт в сеть
+        с твоим настоящим IP. Локальная сеть (принтер, роутер) работает. Не работает вместе с «Через zapret, мимо VPN».
+        Закрыл rxvpn — блокировка снимается сама.</p>
       <label class="check"><input type="checkbox" name="allow_lan" /> Пускать устройства из домашней сети</label>
       <p class="hint">Прокси откроется для всей сети <b>без пароля</b>. Включай только дома, не в кафе и не в общежитии.</p>
       <div class="grid2">

@@ -16,6 +16,7 @@ pub mod checks;
 pub mod geodata;
 pub mod guard;
 pub mod health;
+pub mod killswitch;
 pub mod jsonsub;
 pub mod link;
 pub mod qr;

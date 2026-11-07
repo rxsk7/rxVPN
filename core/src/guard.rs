@@ -22,7 +22,7 @@ use crate::xray::Settings;
 pub const FILE: &str = "settings-guard.json";
 
 /// Поля Settings (имена как в state.json) и как назвать их человеку.
-fn fields() -> [(&'static str, &'static str); 8] {
+fn fields() -> [(&'static str, &'static str); 9] {
     [
         ("allow_lan", trs!("Пускать устройства из сети (прокси без пароля)")),
         ("doh_sys", trs!("DNS без подмены для всей Windows")),
@@ -32,6 +32,7 @@ fn fields() -> [(&'static str, &'static str); 8] {
         ("dns_direct", trs!("DNS напрямую")),
         ("hosts", trs!("Свои записи DNS")),
         ("zapret_dir", trs!("Своя папка стратегий zapret")),
+        ("kill_switch", trs!("Kill switch: интернет только через VPN")),
     ]
 }
 
