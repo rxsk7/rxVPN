@@ -634,3 +634,10 @@ dialog::backdrop { background: rgba(0, 0, 0, .32); backdrop-filter: blur(2px); }
 .menu button { gap: 18px; }
 .soft { opacity: .55; }
 #chk-sec-speed .chk-head h3 { visibility: hidden; } /* заголовок окна уже «Скорость» */
+/* лимит друга — мини-форма под строкой */
+.friend-wrap { display: flex; flex-direction: column; gap: 4px; }
+.friend-limit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--fill-2); }
+.friend-limit label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.friend-limit input { width: 90px; }
+.friend-limit .hint { flex-basis: 100%; margin: 0; }
+.friend-row .traffic.warn { color: var(--orange); }

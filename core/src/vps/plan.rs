@@ -119,7 +119,7 @@ pub fn server_config(r: &Reality, clients: &[Client], own_ips: &[String]) -> Val
         .collect();
     json!({
         "log": {"loglevel": "warning", "access": "none", "dnsLog": false},
-        "api": {"tag": "api", "services": ["StatsService"]},
+        "api": {"tag": "api", "services": ["StatsService", "HandlerService"]},
         "stats": {},
         "policy": {
             "levels": {"0": {"statsUserUplink": true, "statsUserDownlink": true}},
@@ -203,6 +203,137 @@ pub fn fail2ban_jail(ssh_port: u16) -> String {
 
 pub fn auto_upgrades() -> &'static str {
     "APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n"
+}
+
+// ---------- лимиты друзей: учёт и отключение на самом сервере ----------
+// Таймер раз в 2 минуты (от root): забирает счётчики Xray со сбросом, копит их в файле
+// состояния и отключает (`xray api rmu`) тех, у кого кончился трафик или срок. Работает,
+// даже когда комп владельца выключен. Перезапуск Xray возвращает всех из конфига — таймер
+// снова отключит превысивших (и apply() запускает его сразу после перезапуска).
+
+pub const LIMITS_SCRIPT: &str = "/usr/local/lib/rxvpn/limits.py";
+pub const LIMITS_JSON: &str = "/usr/local/etc/xray/rxvpn-limits.json";
+pub const LIMITS_STATE: &str = "/var/lib/rxvpn/usage.json";
+pub const LIMITS_SERVICE: &str = "/etc/systemd/system/rxvpn-limits.service";
+pub const LIMITS_TIMER: &str = "/etc/systemd/system/rxvpn-limits.timer";
+
+/// Скрипт учёта. Пути переопределяются переменными окружения только для тестов
+/// (таймер systemd их не задаёт).
+// i18n-skip-begin: текст скрипта для сервера, не для пользователя
+pub fn limits_script() -> &'static str {
+    r#"#!/usr/bin/env python3
+# rxvpn: учёт трафика друзей и лимиты. Запускает таймер rxvpn-limits (root) раз в 2 минуты.
+import json, os, subprocess, sys, tempfile, time
+
+XRAY = os.environ.get("RXVPN_XRAY", "/usr/local/bin/xray")
+API = "127.0.0.1:10085"
+LIMITS = os.environ.get("RXVPN_LIMITS", "/usr/local/etc/xray/rxvpn-limits.json")
+STATE = os.environ.get("RXVPN_STATE", "/var/lib/rxvpn/usage.json")
+
+def load(p):
+    try:
+        with open(p, encoding="utf-8") as f:
+            v = json.load(f)
+        return v if isinstance(v, dict) else {}
+    except Exception:
+        return {}
+
+def save(p, v):
+    d = os.path.dirname(p)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(v, f)
+    os.replace(tmp, p)
+
+def api(*args):
+    cmd = XRAY.split("|") + ["api", *args, "--server=" + API]
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+
+def main():
+    limits = load(LIMITS)
+    state = load(STATE)
+    if "--reset" in sys.argv:
+        email = sys.argv[sys.argv.index("--reset") + 1]
+        state.pop(email, None)
+    r = api("statsquery", "-pattern", "user>>>", "-reset")
+    if r.returncode == 0:
+        try:
+            stats = json.loads(r.stdout or "{}").get("stat", [])
+        except ValueError:
+            stats = []
+        for s in stats:
+            parts = str(s.get("name", "")).split(">>>")
+            if len(parts) != 4 or parts[0] != "user" or parts[2] != "traffic":
+                continue
+            u = state.setdefault(parts[1], {"up": 0, "down": 0, "blocked": False})
+            key = "up" if parts[3] == "uplink" else "down" if parts[3] == "downlink" else None
+            if key:
+                u[key] = int(u.get(key, 0)) + int(s.get("value", 0) or 0)
+    now = time.time()
+    for email, l in limits.items():
+        u = state.setdefault(email, {"up": 0, "down": 0, "blocked": False})
+        limit, expires = int(l.get("limit", 0) or 0), int(l.get("expires", 0) or 0)
+        over = (limit > 0 and u["up"] + u["down"] >= limit) or (expires > 0 and now >= expires)
+        u["blocked"] = bool(over)
+        if over:
+            api("rmu", "-tag=vless", email)
+    for email in list(state):
+        if email not in limits and email != "owner@rxvpn":
+            state[email]["blocked"] = False
+    save(STATE, state)
+    if "--json" in sys.argv:
+        print(json.dumps(state))
+
+main()
+"#
+}
+// i18n-skip-end
+
+pub fn limits_service() -> String {
+    format!(
+        "[Unit]\nDescription=rxvpn: friends traffic limits\nAfter=xray.service\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 {LIMITS_SCRIPT}\n"
+    )
+}
+
+pub fn limits_timer() -> &'static str {
+    "[Unit]\nDescription=rxvpn: friends traffic limits every 2 minutes\n\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=2min\nAccuracySec=15s\n\n[Install]\nWantedBy=timers.target\n"
+}
+
+/// Лимиты для скрипта: email → {limit: байты, expires: unix}. 0 — без ограничения.
+pub fn limits_json(friends: &[(String, u32, i64)]) -> Value {
+    let mut m = serde_json::Map::new();
+    for (email, limit_gb, expires) in friends {
+        m.insert(email.clone(), json!({"limit": (*limit_gb as u64) << 30, "expires": (*expires).max(0)}));
+    }
+    Value::Object(m)
+}
+
+/// Трафик друга по данным сервера.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub up: u64,
+    pub down: u64,
+    /// Отключён сервером: кончился трафик или срок.
+    pub blocked: bool,
+}
+
+/// Ответ `limits.py --json` (накопленный трафик) или, на старом сервере без скрипта,
+/// `xray api statsquery` (трафик с запуска Xray).
+pub fn parse_usage(out: &str) -> std::collections::HashMap<String, Usage> {
+    let Ok(v) = serde_json::from_str::<Value>(out) else { return Default::default() };
+    if v.get("stat").is_some() || v.as_object().is_some_and(|o| o.is_empty()) {
+        return parse_stats(out).into_iter().map(|(k, (up, down))| (k, Usage { up, down, blocked: false })).collect();
+    }
+    let mut m = std::collections::HashMap::new();
+    for (email, u) in v.as_object().into_iter().flatten() {
+        m.insert(email.clone(), Usage {
+            up: u["up"].as_u64().unwrap_or(0),
+            down: u["down"].as_u64().unwrap_or(0),
+            blocked: u["blocked"].as_bool().unwrap_or(false),
+        });
+    }
+    m
 }
 
 pub fn sshd_dropin() -> &'static str {
@@ -323,6 +454,26 @@ pub fn friend_name(n: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn friend_limits_format_and_usage() {
+        let l = limits_json(&[("f-aaaaaaaaaa@rxvpn".into(), 50, 1_900_000_000), ("f-bbbbbbbbbb@rxvpn".into(), 0, 0)]);
+        assert_eq!(l["f-aaaaaaaaaa@rxvpn"]["limit"], 50u64 << 30, "ГБ → байты");
+        assert_eq!(l["f-aaaaaaaaaa@rxvpn"]["expires"], 1_900_000_000);
+        assert_eq!(l["f-bbbbbbbbbb@rxvpn"]["limit"], 0);
+        // Ответ скрипта лимитов (накопительно, с отметкой «отключён»)
+        let u = parse_usage(r#"{"f-aaaaaaaaaa@rxvpn":{"up":10,"down":20,"blocked":true},"owner@rxvpn":{"up":1,"down":2,"blocked":false}}"#);
+        assert_eq!(u["f-aaaaaaaaaa@rxvpn"], Usage { up: 10, down: 20, blocked: true });
+        // Старый сервер без скрипта — ответ statsquery; пустой — тоже не ошибка
+        let u = parse_usage(r#"{"stat":[{"name":"user>>>owner@rxvpn>>>traffic>>>downlink","value":"7"}]}"#);
+        assert_eq!(u["owner@rxvpn"], Usage { up: 0, down: 7, blocked: false });
+        assert!(parse_usage("{}").is_empty() && parse_usage("мусор").is_empty());
+        // Без HandlerService сервер не смог бы отключить друга на ходу
+        let r = Reality { v6: false, port: 443, sni: "www.apple.com".into(), private_key: "k".into(), short_id: "ab".into() };
+        assert!(server_config(&r, &[], &[])["api"]["services"].as_array().unwrap().iter().any(|x| x == "HandlerService"));
+        // Скрипт и таймер ссылаются на свои пути
+        assert!(limits_service().contains(LIMITS_SCRIPT) && limits_script().contains("rmu") && limits_timer().contains("OnUnitActiveSec=2min"));
+    }
 
     #[test]
     fn keys_ids_link() {

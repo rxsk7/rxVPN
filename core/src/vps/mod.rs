@@ -35,12 +35,27 @@ pub struct Friend {
     pub name: String,
     pub uuid: String,
     pub enabled: bool,
+    /// Лимит трафика, ГБ (вверх + вниз, накопительно). 0 — без лимита.
+    #[serde(default)]
+    pub limit_gb: u32,
+    /// Доступ до (unix, секунды). 0 — бессрочно.
+    #[serde(default)]
+    pub expires: i64,
 }
 
 impl Friend {
     pub fn email(&self) -> String {
         format!("f-{}@rxvpn", self.id)
     }
+
+    /// Срок вышел (по часам этого компа; сервер сверяет по своим).
+    pub fn expired(&self, now: i64) -> bool {
+        self.expires > 0 && now >= self.expires
+    }
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
 /// Свой сервер в state.json. Секреты (ключ SSH, приватный ключ Reality) — в
@@ -156,8 +171,15 @@ impl Vps {
 
     fn clients(&self) -> Vec<Client> {
         let mut v = vec![Client { uuid: self.owner_uuid.clone(), email: OWNER_EMAIL.into() }];
-        v.extend(self.friends.iter().filter(|f| f.enabled).map(|f| Client { uuid: f.uuid.clone(), email: f.email() }));
+        let now = now_unix();
+        v.extend(self.friends.iter().filter(|f| f.enabled && !f.expired(now)).map(|f| Client { uuid: f.uuid.clone(), email: f.email() }));
         v
+    }
+
+    /// Лимиты для серверного скрипта (только включённые друзья).
+    pub fn limits(&self) -> serde_json::Value {
+        let l: Vec<(String, u32, i64)> = self.friends.iter().filter(|f| f.enabled).map(|f| (f.email(), f.limit_gb, f.expires)).collect();
+        limits_json(&l)
     }
 
     /// Поля из чужого файла (бэкап) — в порядке? Кривое — не берём.
@@ -175,7 +197,7 @@ impl Vps {
             && is_uuid(&self.owner_uuid)
             && self.server_ips.len() <= 16
             && self.server_ips.iter().all(|x| x.parse::<std::net::IpAddr>().is_ok())
-            && self.friends.iter().all(|f| hex(&f.id, 10) && is_uuid(&f.uuid) && friend_name(&f.name).is_ok())
+            && self.friends.iter().all(|f| hex(&f.id, 10) && is_uuid(&f.uuid) && friend_name(&f.name).is_ok() && f.limit_gb <= 100_000 && f.expires >= 0)
     }
 }
 
@@ -375,6 +397,11 @@ pub async fn install(t: &Target, login: Login, o: InstallOpts, fetch: Fetch<'_>,
         trs!("автообновления"),
         s.ok(trs!("автообновления"), &format!("S={q}; install -m 0644 \"$S/20auto-upgrades\" /etc/apt/apt.conf.d/20auto-upgrades"), T_SHORT).await,
     );
+    let lim = match put_limits(&s, &st, &v).await {
+        Ok(()) => s.ok(trs!("лимиты друзей"), &format!("S={q}; {}", install_limits_cmd()), T_SHORT).await,
+        Err(e) => Err(e),
+    };
+    soft(trs!("лимиты друзей"), lim);
     // Сначала SSH, потом включаем — иначе запрёмся.
     soft(
         "ufw",
@@ -461,14 +488,43 @@ pub async fn apply(v: &Vps, sec: &Secrets) -> Result<(), String> {
     let q = sh_quote(&st);
     let cfg = serde_json::to_vec_pretty(&server_config(&v.reality(sec), &v.clients(), &v.server_ips)).unwrap();
     s.put(&format!("{st}/config.json"), &cfg).await?;
+    put_limits(&s, &st, v).await?;
     let r = s
         .ok(
             trs!("конфиг"),
-            &format!("S={q}; set -e; {XRAY_BIN} run -test -c \"$S/config.json\"; install -m 0640 -o root -g xray \"$S/config.json\" {XRAY_CONF}; systemctl restart xray; sleep 1; systemctl is-active --quiet xray"),
+            &format!(
+                "S={q}; set -e; {XRAY_BIN} run -test -c \"$S/config.json\"; install -m 0640 -o root -g xray \"$S/config.json\" {XRAY_CONF};                  {}; systemctl restart xray; sleep 1; systemctl is-active --quiet xray; systemctl start rxvpn-limits.service || true",
+                install_limits_cmd()
+            ),
             T_SHORT,
         )
         .await;
     let _ = s.run(&format!("rm -rf {q}"), T_SHORT).await;
+    s.close().await;
+    r.map(|_| ())
+}
+
+/// Залить скрипт лимитов, его таймер и сами лимиты во временную папку.
+async fn put_limits(s: &Ssh, st: &str, v: &Vps) -> Result<(), String> {
+    let lim = serde_json::to_vec(&v.limits()).unwrap();
+    s.put(&format!("{st}/limits.py"), limits_script().as_bytes()).await?;
+    s.put(&format!("{st}/rxvpn-limits.json"), &lim).await?;
+    s.put(&format!("{st}/rxvpn-limits.service"), limits_service().as_bytes()).await?;
+    s.put(&format!("{st}/rxvpn-limits.timer"), limits_timer().as_bytes()).await
+}
+
+/// Разложить их из `$S` и включить таймер (идемпотентно: и при установке, и при каждом apply).
+fn install_limits_cmd() -> String {
+    format!(
+        "install -d -m 0755 /usr/local/lib/rxvpn; install -m 0755 -o root -g root \"$S/limits.py\" {LIMITS_SCRIPT};          install -m 0640 -o root -g xray \"$S/rxvpn-limits.json\" {LIMITS_JSON};          install -m 0644 \"$S/rxvpn-limits.service\" {LIMITS_SERVICE}; install -m 0644 \"$S/rxvpn-limits.timer\" {LIMITS_TIMER};          systemctl daemon-reload; systemctl enable --now rxvpn-limits.timer >/dev/null 2>&1"
+    )
+}
+
+/// Обнулить накопленный трафик друга (и снять отключение по лимиту).
+pub async fn reset_usage(v: &Vps, sec: &Secrets, f: &Friend) -> Result<(), String> {
+    let s = own(v, sec).await?;
+    let email = sh_quote(&f.email());
+    let r = s.ok(trs!("сброс трафика"), &format!("/usr/bin/python3 {LIMITS_SCRIPT} --reset {email}"), T_SHORT).await;
     s.close().await;
     r.map(|_| ())
 }
@@ -504,12 +560,19 @@ pub async fn update_xray(v: &Vps, sec: &Secrets, fetch: Fetch<'_>) -> Result<Str
     r.map(|_| ver)
 }
 
-/// Трафик по клиентам с запуска Xray: email → (вверх, вниз), байты.
-pub async fn traffic(v: &Vps, sec: &Secrets) -> Result<std::collections::HashMap<String, (u64, u64)>, String> {
+/// Трафик по клиентам: email → вверх/вниз и «отключён сервером». Есть скрипт лимитов —
+/// накопительно; старый сервер без него — с последнего запуска Xray.
+pub async fn traffic(v: &Vps, sec: &Secrets) -> Result<std::collections::HashMap<String, Usage>, String> {
     let s = own(v, sec).await?;
-    let r = s.ok(trs!("статистика"), &format!("{XRAY_BIN} api statsquery --server=127.0.0.1:{API_PORT}"), T_SHORT).await;
+    let r = s
+        .ok(
+            trs!("статистика"),
+            &format!("if [ -x {LIMITS_SCRIPT} ]; then /usr/bin/python3 {LIMITS_SCRIPT} --json; else {XRAY_BIN} api statsquery --server=127.0.0.1:{API_PORT}; fi"),
+            T_SHORT,
+        )
+        .await;
     s.close().await;
-    Ok(parse_stats(&r?))
+    Ok(parse_usage(&r?))
 }
 
 /// Убрать Xray с сервера и вернуть вход по паролю (ключ rxvpn уходит вместе с
@@ -553,6 +616,28 @@ mod tests {
         assert!(unseal(&moved).unwrap_err().contains("подменена"), "ключ не уходит на другой адрес");
         v.sealed = "AAAA".into();
         assert!(unseal(&v).is_err());
+    }
+
+    #[test]
+    fn expired_and_disabled_friends_leave_config_and_limits() {
+        let mk = |id: &str, enabled: bool, limit_gb: u32, expires: i64| Friend {
+            id: id.into(), name: "Друг".into(), uuid: uuid_v4(), enabled, limit_gb, expires,
+        };
+        let mut v: Vps = serde_json::from_value(serde_json::json!({"id":"x","name":"n","host":"1.2.3.4","ssh_port":22,"user":"root",
+            "host_key":"SHA256:x","port":443,"sni":"www.apple.com","public_key":"p","short_id":"s","owner_uuid":"u","node_id":"n"})).unwrap();
+        v.friends = vec![
+            mk("aaaaaaaaaa", true, 50, 0),
+            mk("bbbbbbbbbb", true, 0, 1), // срок давно вышел
+            mk("cccccccccc", false, 10, 0), // выключен руками
+        ];
+        let emails: Vec<String> = v.clients().into_iter().map(|c| c.email).collect();
+        assert_eq!(emails, ["owner@rxvpn", "f-aaaaaaaaaa@rxvpn"], "просроченный и выключенный — не в конфиге");
+        let l = v.limits();
+        assert!(l.get("f-aaaaaaaaaa@rxvpn").is_some() && l.get("f-bbbbbbbbbb@rxvpn").is_some());
+        assert!(l.get("f-cccccccccc@rxvpn").is_none(), "выключенного сервер и так не пускает");
+        // Старая запись без новых полей читается (serde default)
+        let old: Friend = serde_json::from_str(r#"{"id":"aaaaaaaaaa","name":"Друг","uuid":"x","enabled":true}"#).unwrap();
+        assert_eq!((old.limit_gb, old.expires), (0, 0));
     }
 
     #[test]

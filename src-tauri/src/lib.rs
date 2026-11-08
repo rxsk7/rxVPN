@@ -5357,6 +5357,8 @@ pub fn run() {
             vpsui::vps_uninstall,
             vpsui::vps_friend_add,
             vpsui::vps_friend_set,
+            vpsui::vps_friend_limits,
+            vpsui::vps_friend_reset,
             vpsui::vps_qr,
             vpsui::vps_copy,
             vpsui::vps_traffic,

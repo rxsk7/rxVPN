@@ -14,6 +14,9 @@ pub(crate) struct FriendView {
     id: String,
     name: String,
     enabled: bool,
+    /// Лимит, ГБ (0 — без лимита) и срок (unix, 0 — бессрочно).
+    limit_gb: u32,
+    expires: i64,
 }
 
 #[derive(Serialize, Clone)]
@@ -51,7 +54,11 @@ pub(crate) fn views(s: &Store) -> Vec<VpsView> {
             key_fp: v.key_fp.clone(),
             password_off: v.password_off,
             node_id: v.node_id.clone(),
-            friends: v.friends.iter().map(|f| FriendView { id: f.id.clone(), name: f.name.clone(), enabled: f.enabled }).collect(),
+            friends: v
+                .friends
+                .iter()
+                .map(|f| FriendView { id: f.id.clone(), name: f.name.clone(), enabled: f.enabled, limit_gb: f.limit_gb, expires: f.expires })
+                .collect(),
         })
         .collect()
 }
@@ -223,7 +230,7 @@ pub(crate) async fn vps_friend_add(app: AppHandle, st: State<'_, AppState>, id: 
     if v.friends.len() >= 50 {
         return Err(trs!("Больше 50 друзей на сервер — перебор").into());
     }
-    v.friends.push(Friend { id: plan::friend_id(), name: name.clone(), uuid: plan::uuid_v4(), enabled: true });
+    v.friends.push(Friend { id: plan::friend_id(), name: name.clone(), uuid: plan::uuid_v4(), enabled: true, limit_gb: 0, expires: 0 });
     apply_friends(&app, &st, v, &sec, tr!("добавлен друг «{name}»")).await
 }
 
@@ -242,6 +249,36 @@ pub(crate) async fn vps_friend_set(app: AppHandle, st: State<'_, AppState>, id: 
         tr!("друг «{name}» {}", if on { trs!("включён") } else { trs!("отключён") })
     };
     apply_friends(&app, &st, v, &sec, what).await
+}
+
+/// Лимит трафика (ГБ, 0 — без лимита) и срок (дней от сегодня, 0 — бессрочно) для друга.
+/// Сервер сам отключит его, когда кончится одно из двух, — даже если этот комп выключен.
+#[tauri::command]
+pub(crate) async fn vps_friend_limits(app: AppHandle, st: State<'_, AppState>, id: String, fid: String, limit_gb: u32, days: u32) -> Res<View> {
+    if limit_gb > 100_000 || days > 3650 {
+        return Err(trs!("Лимит — до 100 000 ГБ, срок — до 10 лет").into());
+    }
+    let _b = busy(&st)?;
+    let (mut v, sec) = get(&st, &id)?;
+    let i = v.friends.iter().position(|f| f.id == fid).ok_or(trs!("Друга уже нет"))?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    v.friends[i].limit_gb = limit_gb;
+    v.friends[i].expires = if days == 0 { 0 } else { now + days as i64 * 86_400 };
+    let name = v.friends[i].name.clone();
+    let lim = if limit_gb == 0 { trs!("без лимита").to_string() } else { tr!("{limit_gb} ГБ") };
+    let till = if days == 0 { trs!("бессрочно").to_string() } else { tr!("на {days} дн.") };
+    apply_friends(&app, &st, v, &sec, tr!("друг «{name}»: {lim}, {till}")).await
+}
+
+/// Обнулить накопленный трафик друга (например, новый месяц) — и снять отключение по лимиту.
+#[tauri::command]
+pub(crate) async fn vps_friend_reset(app: AppHandle, st: State<'_, AppState>, id: String, fid: String) -> Res<View> {
+    let _b = busy(&st)?;
+    let (v, sec) = get(&st, &id)?;
+    let f = v.friends.iter().find(|f| f.id == fid).ok_or(trs!("Друга уже нет"))?.clone();
+    vps::reset_usage(&v, &sec, &f).await?;
+    // Отключённого по лимиту вернуть в работающий Xray — переписываем конфиг.
+    apply_friends(&app, &st, v, &sec, tr!("трафик друга «{}» обнулён", f.name)).await
 }
 
 fn link_of(st: &AppState, id: &str, fid: Option<&str>) -> Res<String> {
@@ -266,8 +303,8 @@ pub(crate) async fn vps_copy(st: State<'_, AppState>, id: String, fid: Option<St
 
 #[derive(Serialize)]
 pub(crate) struct Traffic {
-    /// id друга или "owner" → (вверх, вниз), байты с последнего перезапуска Xray.
-    by: HashMap<String, (u64, u64)>,
+    /// id друга или "owner" → (вверх, вниз, отключён сервером по лимиту/сроку), байты.
+    by: HashMap<String, (u64, u64, bool)>,
 }
 
 #[tauri::command]
@@ -277,11 +314,11 @@ pub(crate) async fn vps_traffic(st: State<'_, AppState>, id: String) -> Res<Traf
     let raw = vps::traffic(&v, &sec).await?;
     let mut by = HashMap::new();
     if let Some(x) = raw.get(plan::OWNER_EMAIL) {
-        by.insert("owner".to_string(), *x);
+        by.insert("owner".to_string(), (x.up, x.down, false));
     }
     for f in &v.friends {
         if let Some(x) = raw.get(&f.email()) {
-            by.insert(f.id.clone(), *x);
+            by.insert(f.id.clone(), (x.up, x.down, x.blocked));
         }
     }
     Ok(Traffic { by })

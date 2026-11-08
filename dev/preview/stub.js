@@ -26,7 +26,10 @@
     zapret_testing: false,
     tg: { running: false, port: 1443, link: "", active: 0, total: 0, web: 0, cloudflare: 0, direct: 0, failed: 0, last_error: "" },
     doh: { running: false, label: "", queries: 0, cached: 0, failed: 0, last_error: "" },
-    vps: [], tor: null, wl_switched: false, health: [], hybrid_active: false, is_windows: true,
+    vps: q.get("vps") ? [{ id: "v1", name: "Мой VPS", host: "198.51.100.7", ssh_port: 22, port: 443, sni: "www.apple.com",
+      xray_version: "26.10.21", os: "Ubuntu 24.04", arch: "amd64", host_key: "SHA256:abc", key_fp: "SHA256:def", password_off: true, node_id: "b1",
+      friends: [{ id: "aaaaaaaaaa", name: "Саша", enabled: true, limit_gb: 50, expires: Math.floor(Date.now() / 1000) + 86400 * 23 },
+                { id: "bbbbbbbbbb", name: "Дима", enabled: true, limit_gb: 10, expires: 0 }] }] : [], tor: null, wl_switched: false, health: [], hybrid_active: false, is_windows: true,
   };
   const handlers = {};
   const log = [
@@ -39,6 +42,7 @@
     take_startup_action: () => null,
     connect: () => new Promise((r) => setTimeout(() => { view.connected = true; view.active_id = view.selected; r(view); }, 4000)), // как настоящий: несколько секунд
     disconnect: () => { view.connected = false; return view; },
+    vps_traffic: () => ({ by: { owner: [1e9, 9e9, false], aaaaaaaaaa: [2.1e9, 17.3e9, false], bbbbbbbbbb: [1.2e9, 9.6e9, true] } }),
     update_check: () => ({ configured: true, current: "0.12.0", version: null, notes: null }),
   };
   window.__TAURI__ = {

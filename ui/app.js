@@ -2695,18 +2695,47 @@ function fillVpsMan() {
     qr.onclick = () => openQr(`${v.name} · ${f.name}`, "vps_qr", { id: v.id, fid: f.id }, t("Пусть друг отсканирует в Happ / v2rayNG / v2RayTun."));
     const cp = el("button", "ghost small", t("Ссылка"));
     cp.onclick = async () => { try { await call("vps_copy", { id: v.id, fid: f.id }); toast(t("Ссылка друга скопирована")); } catch {} };
+    const lim = el("button", "ghost small" + (f.limit_gb || f.expires ? " on" : ""), t("Лимит"));
+    lim.title = t("Лимит трафика и срок доступа — сервер сам отключит друга");
+    lim.onclick = () => { vmLimitOpen = vmLimitOpen === f.id ? null : f.id; fillVpsMan(); };
     const del = el("button", "ghost small danger", "✕");
     del.title = t("Удалить друга");
     del.onclick = () => { if (confirm(t("Удалить «{name}»? Его ссылка перестанет работать.", { name: f.name }))) vmDo("vps_friend_set", { id: v.id, fid: f.id, enabled: null, delete: true }); };
     const who = el("div", "who");
     who.append(el("span", "name", f.name));
-    if (tr) who.append(el("span", "traffic", `↑ ${fmtBytes(tr[0])} ↓ ${fmtBytes(tr[1])}`));
-    r.append(who, tog, qr, cp, del);
-    return r;
+    const used = tr ? tr[0] + tr[1] : null;
+    const parts = [];
+    if (used != null) parts.push(f.limit_gb ? t("{used} из {limit} ГБ", { used: fmtBytes(used), limit: f.limit_gb }) : `↑ ${fmtBytes(tr[0])} ↓ ${fmtBytes(tr[1])}`);
+    else if (f.limit_gb) parts.push(t("лимит {limit} ГБ", { limit: f.limit_gb }));
+    if (f.expires) parts.push(t("до {date}", { date: new Date(f.expires * 1000).toLocaleDateString() }));
+    if (parts.length) who.append(el("span", "traffic", parts.join(" · ")));
+    const expired = f.expires && f.expires * 1000 <= Date.now();
+    if (f.enabled && (expired || (tr && tr[2])))
+      who.append(el("span", "traffic warn", expired ? t("отключён сервером: срок вышел") : t("отключён сервером: кончился трафик")));
+    r.append(who, tog, lim, qr, cp, del);
+    if (vmLimitOpen !== f.id) return r;
+    // Мини-форма лимита — прямо под другом.
+    const box = el("div", "friend-limit");
+    const gb = el("input"); gb.type = "number"; gb.min = "0"; gb.max = "100000"; gb.value = f.limit_gb || ""; gb.placeholder = t("без лимита");
+    const days = el("input"); days.type = "number"; days.min = "0"; days.max = "3650";
+    days.value = f.expires ? Math.max(1, Math.ceil((f.expires * 1000 - Date.now()) / 86400000)) : ""; days.placeholder = t("бессрочно");
+    const l1 = el("label", "", t("ГБ")); l1.prepend(gb);
+    const l2 = el("label", "", t("дней")); l2.prepend(days);
+    const save = el("button", "primary small", t("Сохранить"));
+    save.onclick = () => vmDo("vps_friend_limits", { id: v.id, fid: f.id, limitGb: Number(gb.value) || 0, days: Number(days.value) || 0 },
+      t("Лимит «{name}» сохранён — сервер сам следит за ним", { name: f.name })).then(() => { vmLimitOpen = null; fillVpsMan(); });
+    const reset = el("button", "ghost small", t("Обнулить трафик"));
+    reset.title = t("Новый месяц: счётчик с нуля, отключённый по лимиту — снова работает");
+    reset.onclick = () => vmDo("vps_friend_reset", { id: v.id, fid: f.id }, t("Трафик «{name}» обнулён", { name: f.name })).then(() => { if (vmTraffic[f.id]) vmTraffic[f.id] = [0, 0, false]; fillVpsMan(); });
+    box.append(l1, l2, save, reset, el("p", "hint", t("Пусто — без лимита и бессрочно. Сервер проверяет раз в 2 минуты, даже когда этот комп выключен.")));
+    const wrap = el("div", "friend-wrap");
+    wrap.append(r, box);
+    return wrap;
   }));
   if (!v.friends.length) fl.append(el("p", "hint", t("Пока никого.")));
 }
 let vmBusy = false;
+let vmLimitOpen = null; // у какого друга раскрыта форма лимита
 async function vmDo(cmd, args, okText) {
   if (vmBusy) return;
   vmBusy = true;
@@ -2739,7 +2768,7 @@ $("btn-vm-traffic").onclick = async () => {
   try {
     vmTraffic = (await call("vps_traffic", { id: vmId })).by;
     fillVpsMan();
-    $("vm-status").textContent = t("Трафик — с последнего перезапуска Xray");
+    $("vm-status").textContent = t("Трафик — за всё время (или с последнего «Обнулить трафик»)");
   } catch (e) { $("vm-status").textContent = String(e); } finally { vmBusy = false; }
 };
 $("form-friend").onsubmit = (e) => {
