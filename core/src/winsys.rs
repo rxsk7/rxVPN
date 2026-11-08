@@ -601,6 +601,20 @@ impl Drop for InstanceGuard {
     }
 }
 
+impl InstanceGuard {
+    /// Пустой замок — только для отладочной проверки рядом с запущенной rxvpn.
+    pub fn dummy() -> Self {
+        #[cfg(windows)]
+        {
+            InstanceGuard { handle: unsafe { windows_sys::Win32::System::Threading::CreateMutexW(std::ptr::null(), 0, std::ptr::null()) } }
+        }
+        #[cfg(not(windows))]
+        {
+            InstanceGuard {}
+        }
+    }
+}
+
 // HANDLE — просто число для ОС; guard живёт в одном потоке, но Tauri хочет Send.
 #[cfg(windows)]
 unsafe impl Send for InstanceGuard {}

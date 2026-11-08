@@ -947,6 +947,7 @@
  "обход: непонятный отпечаток «{}»": "bypass: unrecognized fingerprint “{}”",
  "обход: странный id сервера": "bypass: strange server id",
  "обычный SOCKS/HTTP-прокси — это не VPN-сервер": "a plain SOCKS/HTTP proxy is not a VPN server",
+ "окно не открылось с профилем {}: {e} — пробую запасную папку": "the window did not open with profile {}: {e} — trying a fallback folder",
  "он не работает вместе с «Через zapret, мимо VPN»": "it can't work together with “Through zapret, bypassing VPN”",
  "они уже качаются — подожди и выбери ещё раз": "they are already downloading — wait and choose again",
  "ответ {}": "answer {}",

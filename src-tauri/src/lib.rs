@@ -4992,6 +4992,14 @@ fn spawn_sub_updater(app: AppHandle) {
     });
 }
 
+/// Отладка запасного профиля окна: файл `test-bad-webview` рядом с exe. Только
+/// без прав (с правами rxvpn полез бы обновлять защищённую копию).
+fn test_bad_webview() -> bool {
+    cfg!(debug_assertions)
+        && !winsys::is_admin()
+        && std::env::current_exe().is_ok_and(|e| e.with_file_name("test-bad-webview").exists())
+}
+
 /// Папка профиля, которую получило главное окно (мини-окно берёт ту же).
 static WEBVIEW_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
@@ -5045,7 +5053,18 @@ fn protect_and_launch(exe: &Path, paths: &Paths, args: &[String]) -> Res<()> {
     if st != State::Ready {
         let data_core = paths.data.join("core");
         let zip = if protect::needs_core_download(&data_core, protect::KNOWN) {
-            Some(tauri::async_runtime::block_on(net::fetch_core_zip(None)).map_err(|e| tr!("защищённая копия: ядро не скачалось с GitHub — {e}"))?)
+            // GitHub иногда отвечает 502/504 — пробуем несколько раз.
+            let mut got = Err(String::new());
+            for i in 0..3 {
+                if i > 0 {
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+                got = tauri::async_runtime::block_on(net::fetch_core_zip(None));
+                if got.is_ok() {
+                    break;
+                }
+            }
+            Some(got.map_err(|e| tr!("защищённая копия: ядро не скачалось с GitHub — {e}"))?)
         } else {
             None
         };
@@ -5096,7 +5115,8 @@ pub fn run() {
     }
 
     // Вторая копия не нужна: просим первую показать окно и выходим.
-    let Some(_instance) = winsys::acquire_instance(relaunched) else {
+    let test_alone = test_bad_webview();
+    let Some(_instance) = winsys::acquire_instance(relaunched).or_else(|| test_alone.then(winsys::InstanceGuard::dummy)) else {
         handoff_to_running(if from_autostart { "noop" } else { "show" });
         return;
     };
@@ -5180,7 +5200,7 @@ pub fn run() {
     // (её не подменить без прав). Пришли без прав из старого ключа Run — работаем без прав
     // и не просим их: окно UAC при входе человек должен считать подозрительным.
     let autostart_needs_fix = from_autostart && store.settings.run_as_admin && !winsys::is_admin();
-    if cfg!(windows) && store.settings.run_as_admin && !winsys::is_admin() && !relaunched && !from_autostart {
+    if cfg!(windows) && store.settings.run_as_admin && !winsys::is_admin() && !relaunched && !from_autostart && !test_alone {
         let mut a = vec!["--relaunched"];
         if connect_now {
             a.push("--connect");
@@ -5291,30 +5311,57 @@ pub fn run() {
                 .find(|w| w.label == "main")
                 .cloned()
                 .ok_or(trs!("нет окна main в tauri.conf.json"))?;
-            let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &cfg)?
-                .visible(!from_autostart);
-            let (portable, webview_dir, autostart, as_admin, auto_connect) = {
+            let (portable, protected, data, webview_dir, autostart, as_admin, auto_connect) = {
                 let st = app.state::<AppState>();
                 let s = st.store.lock().unwrap();
-                (st.paths.portable, webview_dir(&st.paths, winsys::is_admin()), s.settings.autostart, s.settings.run_as_admin, s.settings.auto_connect)
+                (st.paths.portable, st.paths.protected, st.paths.data.clone(), webview_dir(&st.paths, winsys::is_admin()), s.settings.autostart, s.settings.run_as_admin, s.settings.auto_connect)
             };
+            let admin_copy = protected && winsys::is_admin();
+            // Метка «окно с профилем копии уже не открывалось» (у друга антивирус не пускал
+            // msedgewebview2 в Program Files, хотя сам rxvpn писать туда мог). Подложить её
+            // может кто угодно, но вреда нет: запасная папка не хуже основной.
+            let marker = data.join("webview-fallback");
+            let fallback = || if admin_copy { rxvpn_core::protect::fallback_webview_dir() } else { None };
+            let mut first = None;
             if portable {
-                let dir = if rxvpn_core::protect::writable(&webview_dir) {
-                    Some(webview_dir)
-                } else if winsys::is_admin() {
-                    let fb = rxvpn_core::protect::fallback_webview_dir();
-                    log(app.handle(), tr!("в {} писать нельзя (антивирус?) — профиль окна во временной папке", webview_dir.display()));
-                    fb
+                first = if admin_copy && marker.exists() {
+                    fallback()
+                } else if rxvpn_core::protect::writable(&webview_dir) {
+                    Some(webview_dir.clone())
                 } else {
-                    log(app.handle(), tr!("в {} писать нельзя — профиль окна в %LOCALAPPDATA%", webview_dir.display()));
-                    None
+                    log(app.handle(), tr!("в {} писать нельзя (антивирус?) — профиль окна во временной папке", webview_dir.display()));
+                    fallback()
                 };
-                if let Some(d) = dir {
-                    let _ = WEBVIEW_DIR.set(d.clone());
-                    builder = builder.data_directory(d);
-                }
             }
-            builder.build()?;
+            #[cfg(debug_assertions)]
+            if test_bad_webview() {
+                // Проверка запасного пути: файл вместо папки — WebView2 не создастся.
+                first = std::env::current_exe().ok();
+            }
+            let make = |dir: Option<PathBuf>| {
+                let mut b = tauri::WebviewWindowBuilder::from_config(app.handle(), &cfg)?.visible(!from_autostart);
+                if let Some(d) = dir {
+                    b = b.data_directory(d);
+                }
+                b.build()
+            };
+            match make(first.clone()) {
+                Ok(_) => {
+                    if let Some(d) = first {
+                        let _ = WEBVIEW_DIR.set(d);
+                    }
+                }
+                Err(e) if portable => {
+                    log(app.handle(), tr!("окно не открылось с профилем {}: {e} — пробую запасную папку", first.as_deref().map(|p| p.display().to_string()).unwrap_or_default()));
+                    let _ = std::fs::write(&marker, b"");
+                    let fb = fallback();
+                    make(fb.clone())?;
+                    if let Some(d) = fb {
+                        let _ = WEBVIEW_DIR.set(d);
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            }
 
             #[cfg(debug_assertions)]
             debug_tray_hook(app.handle().clone());

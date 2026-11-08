@@ -272,4 +272,18 @@ mod tests {
         assert!(!valid_data_dir(&d.join("missing")));
         let _ = std::fs::remove_dir_all(&d);
     }
+
+    /// Запасной профиль окна (нужны права администратора: пишет в C:\Windows\Temp).
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn fallback_dir_live() {
+        let a = fallback_webview_dir().expect("папка не создалась");
+        assert!(a.starts_with(crate::winsys::windows_dir().unwrap().join("Temp")));
+        assert!(writable(&a));
+        let b = fallback_webview_dir().expect("вторая не создалась");
+        assert_ne!(a, b);
+        assert!(!a.exists(), "старая запасная папка должна удаляться");
+        std::fs::remove_dir_all(&b).unwrap();
+    }
 }
