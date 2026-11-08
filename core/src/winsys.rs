@@ -179,6 +179,61 @@ fn shell_elevated() -> Option<bool> {
     }
 }
 
+/// Открыть ссылку руками Проводника пользователя — как будто человек кликнул сам: программа
+/// запустится без прав администратора, даже если rxvpn с ними. Способ из блога Microsoft
+/// (Raymond Chen, «How can I launch an unelevated process from my elevated process»):
+/// окно рабочего стола → его вид → объект Shell.Application того же Проводника → ShellExecute.
+#[cfg(windows)]
+fn shell_execute_as_user(url: &str) -> Result<(), String> {
+    let url = url.to_string();
+    // COM — в своём потоке (STA), чтобы не зависеть от того, как его настроил Tauri.
+    std::thread::spawn(move || unsafe {
+        use windows::core::{Interface, BSTR};
+        use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, IDispatch, IServiceProvider, CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED};
+        use windows::Win32::System::Variant::{VARIANT, VT_I4};
+        use windows::Win32::UI::Shell::{IShellBrowser, IShellDispatch2, IShellFolderViewDual, IShellWindows, ShellWindows, SID_STopLevelBrowser, SVGIO_BACKGROUND, SWC_DESKTOP, SWFO_NEEDDISPATCH};
+        let i4 = |n: i32| {
+            let mut v = VARIANT::default();
+            (*v.Anonymous.Anonymous).vt = VT_I4;
+            (*v.Anonymous.Anonymous).Anonymous.lVal = n;
+            v
+        };
+        let inited = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+        let r = (|| -> windows::core::Result<()> {
+            let sw: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_LOCAL_SERVER)?;
+            let (loc, root) = (i4(0), VARIANT::default()); // CSIDL_DESKTOP
+            let mut hwnd = 0i32;
+            let disp = sw.FindWindowSW(&loc, &root, SWC_DESKTOP, &mut hwnd, SWFO_NEEDDISPATCH)?;
+            let sp: IServiceProvider = disp.cast()?;
+            let browser: IShellBrowser = sp.QueryService(&SID_STopLevelBrowser)?;
+            let view = browser.QueryActiveShellView()?;
+            let bg: IDispatch = view.GetItemObject(SVGIO_BACKGROUND)?;
+            let fv: IShellFolderViewDual = bg.cast()?;
+            let shell: IShellDispatch2 = fv.Application()?.cast()?;
+            let empty = VARIANT::default();
+            shell.ShellExecute(&BSTR::from(url.as_str()), &empty, &empty, &empty, &i4(1)) // SW_SHOWNORMAL
+        })();
+        if inited {
+            CoUninitialize();
+        }
+        r.map_err(|e| e.message())
+    })
+    .join()
+    .map_err(|_| trs!("поток упал").to_string())?
+}
+
+/// Есть ли в Windows программа для ссылок `scheme://` (только спрашиваем, ничего не запускаем).
+#[cfg(windows)]
+pub fn has_url_handler(scheme: &str) -> bool {
+    use windows_sys::Win32::UI::Shell::{AssocQueryStringW, ASSOCF_IS_PROTOCOL, ASSOCSTR_COMMAND};
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let (assoc, verb) = (wide(scheme), wide("open"));
+    let mut buf = [0u16; 2048];
+    let mut len = buf.len() as u32;
+    let hr = unsafe { AssocQueryStringW(ASSOCF_IS_PROTOCOL, ASSOCSTR_COMMAND, assoc.as_ptr(), verb.as_ptr(), buf.as_mut_ptr(), &mut len) };
+    hr >= 0 && len > 1 && buf[..(len as usize).saturating_sub(1)].iter().any(|&c| c != b' ' as u16)
+}
+
 pub fn open_tg_link(url: &str) -> Result<(), String> {
     // Только наша ссылка на локальный прокси и только простые символы: Проводник ниже получает
     // её аргументом — ни кавычек, ни пробелов, ни запятых (у explorer.exe это разделители ключей).
@@ -186,6 +241,12 @@ pub fn open_tg_link(url: &str) -> Result<(), String> {
         || !url.bytes().all(|b| b.is_ascii_alphanumeric() || b"/:?=&.%_-".contains(&b))
     {
         return Err(trs!("не та ссылка").into());
+    }
+    // Проводник, если ссылку tg:// никто не открывает, молча показывает папку «Документы» —
+    // человек не видит ни ошибки, ни ссылки. Поэтому спрашиваем Windows заранее.
+    #[cfg(windows)]
+    if !has_url_handler("tg") {
+        return Err(trs!("Telegram Desktop не установлен (никто не открывает ссылки tg://)").into());
     }
     // От администратора сами не открываем: обработчик tg:// Windows берёт и из HKCU\Software\Classes,
     // куда пишет любая программа пользователя, — она запустилась бы с правами администратора.
@@ -201,12 +262,10 @@ pub fn open_tg_link(url: &str) -> Result<(), String> {
                     return Err(trs!("Проводник Windows не запущен — ссылку не открываю (она открылась бы с правами администратора). Ссылка скопирована: вставь её в Telegram").into());
                 }
                 // Проводник без прав: отдаём ему — Telegram откроется без прав администратора.
+                // `explorer.exe ссылка` свежая Windows 11 уже не открывает (показывает
+                // «Документы»), поэтому просим сам Проводник через его COM-интерфейс.
                 Some(false) => {
-                    let explorer = windows_exe("explorer.exe").ok_or(trs!("не нашёл папку Windows"))?;
-                    let mut c = std::process::Command::new(explorer);
-                    c.arg(url);
-                    crate::runner::clean_env(&mut c);
-                    return c.spawn().map(|_| ()).map_err(|e| tr!("не открылось: {e}"));
+                    return shell_execute_as_user(url).map_err(|e| tr!("не открылось: {e}"));
                 }
                 // Проводник сам с правами администратора: у пользователя всё и так от админа —
                 // открыть напрямую ничего не повышает (ниже, как без прав).
@@ -713,3 +772,24 @@ mod path_tests {
     }
 }
 
+
+#[cfg(all(test, windows))]
+mod url_handler_tests {
+    /// Живая проверка на этом ПК: http есть всегда, выдуманной схемы — нет.
+    #[test]
+    fn handlers() {
+        assert!(super::has_url_handler("https"));
+        assert!(!super::has_url_handler("rxvpn-no-such-scheme"));
+        eprintln!("tg:// на этом ПК: {}", super::has_url_handler("tg"));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod shell_exec_tests {
+    /// Живая проверка (откроет Telegram на канале @durov): ссылка — руками Проводника пользователя.
+    #[test]
+    #[ignore]
+    fn open_as_user_live() {
+        super::shell_execute_as_user("tg://resolve?domain=durov&post=1").unwrap();
+    }
+}

@@ -994,6 +994,7 @@
  "порты {}": "ports {}",
  "после выключения пароля вход по ключу не прошёл ({e}) — откатываю": "key login failed after turning off the password ({e}) — rolling back",
  "после имени сайта — тишина": "silence after the site name",
+ "поток упал": "the thread crashed",
  "похоже на белые списки: открываются только разрешённые сайты": "looks like whitelists: only allowed sites open",
  "применение фильтров": "applying filters",
  "провайдер не дал адрес": "ISP gave no address",

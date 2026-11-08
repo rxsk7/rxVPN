@@ -632,8 +632,9 @@ async function tgOpen() {
     await call("tg_open");
     store("tg-linked", "1");
     toast(t("В Telegram нажми «Подключить прокси»"));
-  } catch {
-    try { await navigator.clipboard.writeText(V.tg.link); toast(t("Ссылка на прокси скопирована — вставь в «Избранное» в Telegram и нажми на неё")); } catch {}
+  } catch (e) {
+    try { await navigator.clipboard.writeText(V.tg.link); } catch {}
+    toast(String(e) + ". " + t("Ссылка на прокси скопирована — вставь в «Избранное» в Telegram и нажми на неё"));
   }
 }
 $("btn-tg-open").onclick = () => tgOpen();
