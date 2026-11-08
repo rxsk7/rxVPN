@@ -1685,6 +1685,9 @@ fn dns_section(s: &Settings, servers: &[&str]) -> Value {
 /// Исходящие сервера без наших direct/block: главный (tag "proxy") +
 /// помощники из JSON-подписки (fragment и т.п.).
 pub fn node_outbounds(node: &Node) -> Vec<Value> {
+    if crate::singbox::is_sidecar_link(&node.link) {
+        return vec![outbound(node)];
+    }
     match node.raw.as_ref().and_then(|r| r["outbounds"].as_array()) {
         // Каждый раз чистим заново: raw мог прийти из старого state.json или бэкапа.
         Some(raw) if !raw.is_empty() => crate::jsonsub::sanitize_outbounds(raw.clone()).0,
@@ -2005,6 +2008,10 @@ fn retag(list: Vec<Value>, main: &str, aux_prefix: &str) -> Vec<Value> {
 
 /// Исходящее подключение к серверу (tag "proxy").
 pub fn outbound(n: &Node) -> Value {
+    // TUIC: Xray — SOCKS к sing-box на 127.0.0.1 (его поднимает runner).
+    if crate::singbox::is_sidecar_link(&n.link) {
+        return crate::singbox::xray_outbound(&n.link).unwrap_or_else(|| json!({"tag": "proxy", "protocol": "blackhole"}));
+    }
     let settings = match n.protocol {
         Protocol::Vless => {
             let mut user = Map::new();

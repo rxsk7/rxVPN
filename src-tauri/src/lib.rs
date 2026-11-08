@@ -284,6 +284,8 @@ struct View {
     lists: Option<ListsInfo>,
     lists_busy: bool,
     core_installed: bool,
+    /// sing-box для серверов TUIC скачан.
+    singbox_installed: bool,
     core_dir: String,
     data_dir: String,
     portable: bool,
@@ -543,6 +545,7 @@ fn view(st: &AppState) -> View {
         lists: geodata::info(&st.paths.core),
         lists_busy: st.lists_busy.load(Ordering::SeqCst),
         core_installed,
+        singbox_installed: rxvpn_core::singbox::installed(&st.paths.core),
         core_dir: st.paths.core.display().to_string(),
         data_dir: st.paths.data.display().to_string(),
         portable: st.paths.portable,
@@ -4651,6 +4654,32 @@ async fn download_core(app: AppHandle, st: State<'_, AppState>) -> Res<View> {
     Ok(view(&st))
 }
 
+/// Скачать sing-box (только для серверов TUIC: в Xray этого протокола нет).
+/// Одна проверенная версия — хеши архива и exe вшиты в rxvpn.
+#[tauri::command]
+async fn download_singbox(app: AppHandle, st: State<'_, AppState>) -> Res<View> {
+    if st.paths.protected && !winsys::is_admin() {
+        return Err(trs!("Ядро лежит в папке программы (Program Files) — обновить его можно только с правами администратора: перезапусти rxvpn от администратора и нажми ещё раз").into());
+    }
+    log(&app, tr!("качаю sing-box {} с GitHub (~33 МБ)…", rxvpn_core::singbox::VERSION));
+    let zip = rxvpn_core::singbox::fetch_zip(probe_proxy(&st)).await?;
+    // Запущенный sing-box.exe не перезаписать — если сейчас TUIC, переподключимся.
+    let connected = is_connected(&st);
+    let tun = st.tun_active.load(Ordering::SeqCst);
+    if connected && rxvpn_core::singbox::installed(&st.paths.core) {
+        stop_core(&st);
+    }
+    let r = rxvpn_core::singbox::install_zip(&zip, &st.paths.core);
+    if connected && !is_connected(&st) {
+        let rr = start_core_blocking(&app, tun).await;
+        refresh_tray(&app);
+        rr?;
+    }
+    r?;
+    log(&app, tr!("sing-box {} установлен — серверы TUIC работают", rxvpn_core::singbox::VERSION));
+    Ok(view(&st))
+}
+
 #[tauri::command]
 async fn open_core_dir(st: State<'_, AppState>) -> Res<()> {
     let dir = &st.paths.core;
@@ -5372,6 +5401,7 @@ pub fn run() {
             kill_release,
             app_traffic,
             app_traffic_stop,
+            download_singbox,
             show_main_window,
             select_server,
             delete_server,

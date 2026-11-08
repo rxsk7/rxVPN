@@ -297,6 +297,9 @@ pub(crate) async fn vps_set_exit(app: AppHandle, st: State<'_, AppState>, id: St
         if n.id == v.node_id || n.link == v.owner_link(&v.name) {
             return Err(trs!("Выходной сервер — другой сервер, не сам мост").into());
         }
+        if rxvpn_core::warp::is_warp(&n.id) || !vps::exit_ok(&n.link) {
+            return Err(trs!("Выходным сервером моста может быть VLESS, Trojan, Shadowsocks или Hysteria2 — TUIC, WARP и сервера из JSON-подписок на сервере не заработают").into());
+        }
         rxvpn_core::parse_link(&n.link).map_err(|e| tr!("выходной сервер: {e}"))?;
         v.exit = n.link.clone();
         Some(n.name)

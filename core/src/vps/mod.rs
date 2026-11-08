@@ -54,6 +54,12 @@ impl Friend {
     }
 }
 
+/// Выход моста — обычная ссылка, которую поймёт Xray на сервере: без sing-box (TUIC)
+/// и без WARP (его ключ живёт только в rxvpn).
+pub fn exit_ok(link: &str) -> bool {
+    !crate::singbox::is_sidecar_link(link) && link.contains("://") && !link.trim_start().starts_with('{')
+}
+
 fn now_unix() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
@@ -185,6 +191,9 @@ impl Vps {
         if self.exit.is_empty() {
             return Ok(Vec::new());
         }
+        if !exit_ok(&self.exit) {
+            return Err(trs!("выходной сервер моста: TUIC и WARP на сервере не работают — выбери VLESS, Trojan, Shadowsocks или Hysteria2").into());
+        }
         let n = crate::parse_link(&self.exit).map_err(|e| tr!("выходной сервер моста: {e}"))?;
         Ok(crate::xray::node_outbounds(&n))
     }
@@ -211,7 +220,7 @@ impl Vps {
             && self.server_ips.len() <= 16
             && self.server_ips.iter().all(|x| x.parse::<std::net::IpAddr>().is_ok())
             && self.friends.iter().all(|f| hex(&f.id, 10) && is_uuid(&f.uuid) && friend_name(&f.name).is_ok() && f.limit_gb <= 100_000 && f.expires >= 0)
-            && (self.exit.is_empty() || (self.exit.len() <= 4096 && crate::parse_link(&self.exit).is_ok()))
+            && (self.exit.is_empty() || (self.exit.len() <= 4096 && exit_ok(&self.exit) && crate::parse_link(&self.exit).is_ok()))
     }
 }
 
@@ -632,6 +641,13 @@ mod tests {
         assert!(unseal(&moved).unwrap_err().contains("подменена"), "ключ не уходит на другой адрес");
         v.sealed = "AAAA".into();
         assert!(unseal(&v).is_err());
+    }
+
+    #[test]
+    fn bridge_exit_kinds() {
+        assert!(exit_ok("vless://u@h:443"));
+        assert!(!exit_ok("tuic://2dd61d93-75d8-4da4-ac0e-6aece7eac365:p@h:443"), "TUIC — нужен sing-box, на сервере его нет");
+        assert!(!exit_ok("{\"outbounds\": []}"), "JSON-подписка — не ссылка");
     }
 
     #[test]

@@ -33,6 +33,10 @@ pub fn sanitize_outbounds(list: Vec<Value>) -> (Vec<Value>, Vec<String>) {
         .into_iter()
         .enumerate()
         .map(|(i, mut o)| {
+            // Метку sing-box ставит только сам rxvpn — из подписки её не берём.
+            if let Some(m) = o.as_object_mut() {
+                m.retain(|k, _| crate::defang::fold(k) != crate::defang::fold(crate::singbox::MARK));
+            }
             let tag = o["tag"].as_str().unwrap_or("").to_string();
             let off = |why: String, notes: &mut Vec<String>| {
                 notes.push(tr!("outbound «{tag}» отключён: {why}"));

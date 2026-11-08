@@ -226,10 +226,13 @@ pub fn port_free(port: u16) -> bool {
 
 type LineCb = Arc<dyn Fn(String) + Send + Sync>;
 type ExitCb = Arc<dyn Fn() + Send + Sync>;
+pub type LineFn = LineCb;
 
 pub struct XrayProcess {
     child: Child,
     tail: Arc<Mutex<VecDeque<String>>>,
+    /// sing-box рядом — для серверов TUIC (см. singbox.rs). Гасится вместе с Xray.
+    sidecar: Option<crate::singbox::Sidecar>,
 }
 
 impl XrayProcess {
@@ -249,6 +252,22 @@ impl XrayProcess {
         }
         // С правами администратора: ядро сверено и закрыто от подмены до конца запуска.
         core_guard(core_dir)?;
+        let on_line: LineCb = Arc::new(on_line);
+
+        // Серверы TUIC: их выходы в конфиге помечены — поднимаем sing-box и отдаём
+        // Xray конфиг без меток (с портами sing-box).
+        let mut sidecar = None;
+        let patched;
+        let config = if config.windows(crate::singbox::MARK.len()).any(|w| w == crate::singbox::MARK.as_bytes()) {
+            let mut cfg: serde_json::Value = serde_json::from_slice(config).map_err(|e| e.to_string())?;
+            if let Some((sb, ports)) = crate::singbox::split(&mut cfg)? {
+                sidecar = Some(crate::singbox::Sidecar::start(core_dir, &sb, &ports, on_line.clone())?);
+            }
+            patched = serde_json::to_vec(&cfg).map_err(|e| e.to_string())?;
+            &patched[..]
+        } else {
+            config
+        };
 
         let mut cmd = Command::new(&exe);
         cmd.args(["run", "-c", "stdin:", "-format", "json"])
@@ -277,7 +296,6 @@ impl XrayProcess {
         job::attach(&child);
 
         let tail = Arc::new(Mutex::new(VecDeque::with_capacity(200)));
-        let on_line: LineCb = Arc::new(on_line);
         let on_exit: ExitCb = Arc::new(on_exit);
 
         if let Some(out) = child.stdout.take() {
@@ -293,7 +311,7 @@ impl XrayProcess {
             let _ = pipe.write_all(config);
         }
 
-        let mut p = Self { child, tail };
+        let mut p = Self { child, tail, sidecar };
 
         // Ждём, пока ядро либо напишет "Xray ... started" (готово принимать
         // подключения), либо упадёт (кривой конфиг) — до 5 секунд. Фиксированная
@@ -328,13 +346,17 @@ impl XrayProcess {
         Ok(p)
     }
 
+    /// Жив Xray (и sing-box, если он нужен этому подключению).
     pub fn is_running(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        matches!(self.child.try_wait(), Ok(None)) && self.sidecar.as_mut().is_none_or(|s| s.is_running())
     }
 
     pub fn stop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(s) = self.sidecar.as_mut() {
+            s.stop();
+        }
     }
 }
 
@@ -430,6 +452,18 @@ pub(crate) fn clean_env(cmd: &mut Command) {
     }
 }
 
+/// Вывод помощника (sing-box) — в лог с пометкой, без хвоста и без on_exit.
+pub(crate) fn pipe_logs(child: &mut Child, who: &'static str, on_line: LineCb) {
+    let tail = Arc::new(Mutex::new(VecDeque::new()));
+    let cb: LineCb = Arc::new(move |l: String| on_line(format!("[{who}] {l}")));
+    if let Some(out) = child.stdout.take() {
+        pipe_lines(out, tail.clone(), cb.clone(), None);
+    }
+    if let Some(err) = child.stderr.take() {
+        pipe_lines(err, tail, cb, None);
+    }
+}
+
 fn pipe_lines(
     src: impl Read + Send + 'static,
     tail: Arc<Mutex<VecDeque<String>>>,
@@ -458,7 +492,7 @@ fn pipe_lines(
 /// Когда процесс rxvpn умирает, Windows закрывает его дескрипторы, задача
 /// закрывается — и все привязанные к ней xray.exe завершаются.
 #[cfg(windows)]
-mod job {
+pub(crate) mod job {
     use std::sync::OnceLock;
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{

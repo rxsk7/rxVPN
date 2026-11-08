@@ -1959,6 +1959,8 @@ function fillSettings() {
   syncFragment();
   $("core-state").textContent = V.core_installed ? t("Установлено") : t("Не скачано");
   $("core-state").className = "core-state " + (V.core_installed ? "ok" : "bad");
+  $("sb-state").textContent = V.singbox_installed ? t("Установлено") : t("Не скачано");
+  $("sb-state").className = "core-state " + (V.singbox_installed ? "ok" : "");
   $("core-dir").textContent =
     (V.portable ? t("Портативная версия — всё хранится в: ") : t("Данные: ")) + V.data_dir;
 }
@@ -2048,6 +2050,15 @@ async function downloadCore(btn) {
 $("btn-core-dl").onclick = (e) => downloadCore(e.currentTarget);
 $("btn-core-banner").onclick = (e) => downloadCore(e.currentTarget);
 $("btn-core-dir").onclick = () => call("open_core_dir");
+$("btn-sb-dl").onclick = async (e) => {
+  const btn = e.currentTarget, label = [...btn.childNodes];
+  btn.disabled = true; btn.textContent = t("Качаю…");
+  try {
+    V = await call("download_singbox");
+    render(); fillSettings();
+    toast(t("sing-box установлен — серверы TUIC работают"));
+  } catch {} finally { btn.disabled = false; btn.replaceChildren(...label); }
+};
 $("btn-notify-test").onclick = () => call("test_notification");
 $("btn-config-close").onclick = () => $("dlg-config").close();
 

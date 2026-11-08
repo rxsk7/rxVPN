@@ -27,6 +27,7 @@ pub mod net;
 pub mod node;
 pub mod runner;
 pub mod services;
+pub mod singbox;
 pub mod stats;
 pub mod store;
 pub mod sysdns;

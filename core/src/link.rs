@@ -44,9 +44,7 @@ pub fn parse_link(link: &str) -> Result<Node> {
         "vmess" => parse_vmess(link),
         "ss" => parse_ss(link),
         "hysteria2" | "hy2" => parse_hysteria2(link),
-        "tuic" => Err(LinkError::Unsupported(
-            trs!("tuic:// — в ядре Xray этого протокола нет (только в sing-box)").into(),
-        )),
+        "tuic" => parse_tuic(link).map(|(n, _)| n),
         "wireguard" | "wg" => Err(LinkError::Unsupported(tr!("{scheme}:// — пока не поддерживается ядром клиента"
         ))),
         other => Err(LinkError::UnknownScheme(shorten(other))),
@@ -151,6 +149,104 @@ fn id_for(link: &str) -> String {
 /// Порт может быть списком для «прыжков»: хост:443,20000-30000 (или mport=…).
 /// Собираем готовый outbound Xray (протокол hysteria, транспорт hysteria, TLS) —
 /// дальше он идёт той же дорогой, что сервера из JSON-подписок (с той же очисткой).
+/// Параметры tuic:// для sing-box (в Xray TUIC нет: его везёт sing-box рядом с Xray).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tuic {
+    pub host: String,
+    pub port: u16,
+    pub uuid: String,
+    pub password: String,
+    pub sni: Option<String>,
+    pub alpn: Vec<String>,
+    /// bbr / cubic / new_reno
+    pub congestion: String,
+    /// native / quic
+    pub udp_relay: String,
+}
+
+/// tuic://uuid:пароль@хост:порт?sni=…&alpn=h3&congestion_control=bbr&udp_relay_mode=native#имя
+pub fn parse_tuic(link: &str) -> Result<(Node, Tuic)> {
+    let rest = link.split_once("://").map(|x| x.1).unwrap_or("");
+    let (main, frag) = rest.split_once('#').unwrap_or((rest, ""));
+    let (before_q, query) = main.split_once('?').unwrap_or((main, ""));
+    let authority = before_q.split('/').next().unwrap_or("");
+    let (auth, hostport) = authority.rsplit_once('@').ok_or_else(|| LinkError::Malformed(trs!("нет UUID и пароля перед '@'").into()))?;
+    let (uuid, password) = auth.split_once(':').map(|(u, p)| (pct(u), pct(p))).unwrap_or((pct(auth), String::new()));
+    let uuid = uuid.to_ascii_lowercase();
+    if !crate::vps::plan::is_uuid(&uuid) {
+        return Err(LinkError::Malformed(trs!("в tuic:// нужен UUID (TUIC v5)").into()));
+    }
+    if password.chars().any(char::is_control) || password.len() > 256 {
+        return Err(LinkError::Malformed(trs!("кривой пароль").into()));
+    }
+    let (host, port) = if let Some(r) = hostport.strip_prefix('[') {
+        let (h, tail) = r.split_once(']').ok_or_else(|| LinkError::Malformed(trs!("кривой IPv6").into()))?;
+        if h.parse::<std::net::Ipv6Addr>().is_err() {
+            return Err(LinkError::Malformed(trs!("кривой IPv6").into()));
+        }
+        (h.to_string(), tail.strip_prefix(':').unwrap_or("443").to_string())
+    } else {
+        match hostport.rsplit_once(':') {
+            Some((h, p)) => (h.to_ascii_lowercase(), p.to_string()),
+            None => (hostport.to_ascii_lowercase(), "443".into()),
+        }
+    };
+    let host_ok = !host.is_empty()
+        && (host.parse::<std::net::IpAddr>().is_ok()
+            || Url::parse(&format!("http://{host}/")).ok().and_then(|u| u.host_str().map(str::to_string)).as_deref() == Some(host.as_str()));
+    if !host_ok {
+        return Err(LinkError::Malformed(tr!("кривой адрес «{}»", shorten(&host))));
+    }
+    let port: u16 = port.parse().ok().filter(|p| *p > 0).ok_or_else(|| LinkError::Malformed(trs!("кривой порт").into()))?;
+    let q: HashMap<String, String> = url::form_urlencoded::parse(query.as_bytes()).into_owned().collect();
+    if matches!(q.get("allow_insecure").or_else(|| q.get("insecure")).map(String::as_str), Some("1" | "true")) {
+        return Err(LinkError::Unsupported(
+            trs!("tuic:// с allow_insecure=1: без проверки сертификата сервер можно подменить по дороге. Нужен сервер с настоящим сертификатом (Let's Encrypt)").into(),
+        ));
+    }
+    let sni = non_empty(q.get("sni").or_else(|| q.get("peer"))).or_else(|| host.parse::<std::net::IpAddr>().is_err().then(|| host.clone()));
+    let alpn: Vec<String> = q.get("alpn").map(|a| a.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()).unwrap_or_default();
+    let alpn = if alpn.is_empty() { vec!["h3".to_string()] } else { alpn };
+    if alpn.len() > 4 || alpn.iter().any(|a| a.len() > 16 || !a.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'/' || b == b'.' || b == b'-')) {
+        return Err(LinkError::Malformed(trs!("кривой alpn").into()));
+    }
+    let congestion = match q.get("congestion_control").or_else(|| q.get("congestion")).map(|s| s.to_ascii_lowercase()).as_deref() {
+        None | Some("") | Some("bbr") => "bbr",
+        Some("cubic") => "cubic",
+        Some("new_reno") | Some("newreno") => "new_reno",
+        Some(o) => return Err(LinkError::Unsupported(format!("congestion_control={}", shorten(o)))),
+    }
+    .to_string();
+    let udp_relay = match q.get("udp_relay_mode").map(|s| s.to_ascii_lowercase()).as_deref() {
+        None | Some("") | Some("native") => "native",
+        Some("quic") => "quic",
+        Some(o) => return Err(LinkError::Unsupported(format!("udp_relay_mode={}", shorten(o)))),
+    }
+    .to_string();
+    let t = Tuic { host: host.clone(), port, uuid: uuid.clone(), password: password.clone(), sni: sni.clone(), alpn: alpn.clone(), congestion, udp_relay };
+    let name = Some(pct(frag)).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("{host}:{port}"));
+    let node = Node {
+        id: id_for(link),
+        name,
+        protocol: Protocol::Other,
+        address: host,
+        port,
+        uuid: Some(uuid),
+        password: Some(password),
+        method: None,
+        flow: None,
+        encryption: None,
+        alter_id: 0,
+        transport: Transport { network: "tuic".into(), ..Default::default() },
+        security: Security { kind: "tls".into(), sni, alpn, ..Default::default() },
+        link: link.to_string(),
+        sub_id: None,
+        group: None,
+        raw: None,
+    };
+    Ok((node, t))
+}
+
 fn parse_hysteria2(link: &str) -> Result<Node> {
     let rest = link.split_once("://").map(|x| x.1).unwrap_or("");
     let (main, frag) = rest.split_once('#').unwrap_or((rest, ""));
@@ -654,12 +750,14 @@ mod tests {
 
     #[test]
     fn subscription_base64() {
-        let text = format!("{VLESS_REALITY_XHTTP}\ntrojan://p@a.b:443#t\nhysteria2://x@y.com:1#h\ntuic://u:p@y.com:1#t\n");
+        let text = format!(
+            "{VLESS_REALITY_XHTTP}\ntrojan://p@a.b:443#t\nhysteria2://x@y.com:1#h\ntuic://2dd61d93-75d8-4da4-ac0e-6aece7eac365:p@y.com:1#t\ntuic://u:p@y.com:1#bad\n"
+        );
         let sub = base64::engine::general_purpose::STANDARD.encode(text);
         let (nodes, errors) = parse_many(&sub);
-        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes.len(), 4, "TUIC v5 — свой сервер (через sing-box)");
         assert_eq!(errors.len(), 1);
-        assert!(errors[0].contains("sing-box"), "{errors:?}");
+        assert!(errors[0].contains("UUID"), "{errors:?}");
     }
 
     #[test]

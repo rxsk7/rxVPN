@@ -132,6 +132,9 @@ pub struct Node {
 impl Node {
     /// Короткое описание для списка: "VLESS · xhttp · reality".
     pub fn summary(&self) -> String {
+        if self.transport.network == "tuic" {
+            return "TUIC · QUIC · sing-box".into();
+        }
         let proto = match &self.raw {
             Some(raw) => raw["outbounds"][0]["protocol"]
                 .as_str()
