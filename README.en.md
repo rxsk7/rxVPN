@@ -42,6 +42,8 @@
 - **Kill switch**: if the VPN drops, the internet closes — no app reaches the network with your real IP.
 - Tamper-free DNS, leak checks for IP, DNS and IPv6.
 - **Your own VPN server in five minutes**: give rxvpn your VPS address and password — it installs and hardens the VPN.
+  Share it with friends: a QR code, a GB cap and an expiry date per friend — the server cuts them off by itself.
+- **Traffic by program**: see which app eats your subscription's data cap.
 - Signed updates, server passwords encrypted with your Windows account key, no telemetry.
 
 ## Getting started
