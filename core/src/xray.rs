@@ -1086,6 +1086,9 @@ pub struct HybridService {
     pub key: &'static str,
     pub name: &'static str,
     pub domains: &'static [&'static str],
+    /// Программы сервиса — мимо VPN целиком: голос Discord идёт по UDP прямо на IP
+    /// голосового сервера, имени сайта в нём нет, и правило по доменам его не ловит.
+    pub apps: &'static [&'static str],
     pub targets: &'static [(&'static str, &'static str)],
 }
 
@@ -1099,6 +1102,7 @@ pub const HYBRID_SERVICES: &[HybridService] = &[
             "jnn-pa.googleapis.com", "yt3.googleusercontent.com", "yt-video-upload.l.google.com",
             "wide-youtube.l.google.com", "youtube-ui.l.google.com", "ytimg.l.google.com",
         ],
+        apps: &[],
         targets: &[
             ("YouTube", "https://www.youtube.com"),
             ("youtu.be", "https://youtu.be"),
@@ -1117,6 +1121,7 @@ pub const HYBRID_SERVICES: &[HybridService] = &[
             // discordsays.com — не здесь: через него «Активности» Discord ходят на сервера
             // сторонних разработчиков, и любой сайт может дёрнуть его мимо VPN.
         ],
+        apps: &["Discord", "DiscordPTB", "DiscordCanary"],
         targets: &[
             ("Discord", "https://discord.com"),
             ("Discord Gateway", "https://gateway.discord.gg"),
@@ -1129,6 +1134,7 @@ pub const HYBRID_SERVICES: &[HybridService] = &[
         key: "twitch",
         name: "Twitch",
         domains: &["twitch.tv", "ttvnw.net", "jtvnw.net", "twitchcdn.net", "twitchsvc.net", "live-video.net", "ext-twitch.tv"],
+        apps: &[],
         targets: &[
             ("Twitch", "https://www.twitch.tv"),
             ("Twitch images", "https://static-cdn.jtvnw.net"),
@@ -1855,6 +1861,12 @@ fn routing(s: &Settings, px: &str, auto: bool, o: &RunOpts, sites: &[(&[String],
     let hybrid = hybrid_domains(s);
     if s.zapret_hybrid && !s.zapret && !hybrid.is_empty() {
         rules.push(put(json!({ "domain": hybrid }), To::Direct, px));
+    }
+    // …и их программы (Discord.exe): иначе голос уходил в VPN, пока человек сам не
+    // добавит Discord в «Программы мимо VPN».
+    let hybrid_apps: Vec<String> = hybrid_on(s).iter().flat_map(|x| x.apps.iter().map(|a| a.to_string())).collect();
+    if s.zapret_hybrid && !s.zapret && !hybrid_apps.is_empty() {
+        rules.push(put(json!({ "process": app_names(&hybrid_apps) }), To::Direct, px));
     }
 
     match mode {
@@ -2895,6 +2907,13 @@ mod tests {
         validate_settings(&s).unwrap();
         let c = build_run_config(&Upstream::Single(&n), &s, &RunOpts::default()).to_string();
         assert!(c.contains("domain:ttvnw.net") && c.contains("domain:discord.gg") && c.contains("domain:kick.com") && !c.contains("googlevideo"));
+        // Discord в гибриде — и его программа мимо VPN (голос по UDP без имени сайта).
+        let cv = build_run_config(&Upstream::Single(&n), &s, &RunOpts::default());
+        let pr = cv["routing"]["rules"].as_array().unwrap().iter().find(|r| r["process"].as_array().is_some_and(|p| p.iter().any(|x| x == "Discord"))).expect("правило для Discord.exe");
+        assert_eq!(pr["outboundTag"], "direct");
+        assert!(pr["process"].as_array().unwrap().iter().any(|x| x == "discord"));
+        let yt_only = Settings { zapret_hybrid: true, hybrid_services: Some(vec!["youtube".into()]), ..Default::default() };
+        assert!(!build_run_config(&Upstream::Single(&n), &yt_only, &RunOpts::default()).to_string().contains("\"Discord\""));
         assert!(hybrid_hosts(&s).contains(&"twitch.tv".to_string()) && hybrid_hosts(&s).contains(&"kick.com".to_string()));
         let t = hybrid_targets(&s);
         assert!(t.iter().any(|x| x.1 == "https://www.twitch.tv") && t.iter().any(|x| x.1 == "https://kick.com") && !t.iter().any(|x| x.0.starts_with("YouTube")));
