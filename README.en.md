@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <b>An open internet — with one button.</b><br>
-  A Windows VPN client that gets around censorship by itself.
+  <b>A private connection — with one button.</b><br>
+  A Windows client: your own servers, smart routing and leak protection.
 </p>
 
 <p align="center">
@@ -31,19 +31,18 @@
 - **Mini window by the clock**, the **Ctrl+Alt+V** hotkey and auto-connect when you start a chosen program (Discord, a game).
 - A server stops answering over one protocol — rxvpn tries the same server over another (say, Hysteria2 instead of VLESS).
 
-**Getting around blocks**
-- Route only blocked sites through the VPN, or everything except local sites.
-- **YouTube and Discord without a VPN** via zapret (DPI bypass): faster and uses no VPN traffic. rxvpn picks the strategy for you.
-- **Telegram without a VPN** with one switch — Telegram opens with “Connect proxy” by itself.
-- **“Why won't this site open?”** checks in 10 seconds what your ISP did to a site and suggests the fix.
-- **Whitelist mode**: when the mobile network only lets allowed sites through, rxvpn finds a server that gets through —
-  or helps you build a **bridge** through your own VPS in a Russian cloud.
+**Routing and network**
+- **Split routing**: local sites go direct, the rest through your server. Custom rules for sites and apps.
+- **Connection tuning** for specific services ([zapret](https://github.com/bol-van/zapret)) — uses no server traffic.
+- **Built-in Telegram proxy** with one switch.
+- **Network diagnostics** — in 10 seconds shows why a site won't open and suggests a fix.
+- **Unstable mobile networks** — rxvpn finds a server it can still reach, or helps you chain two of your own servers.
 
 **Protection**
 - **Kill switch**: if the VPN drops, the internet closes — no app reaches the network with your real IP.
 - Tamper-free DNS, leak checks for IP, DNS and IPv6.
-- **Your own VPN server in five minutes**: give rxvpn your VPS address and password — it installs and hardens the VPN.
-  Share it with friends: a QR code, a GB cap and an expiry date per friend — the server cuts them off by itself.
+- **Your own server in five minutes**: give rxvpn your VPS address and password — it sets everything up and hardens it.
+  Give friends access: a QR code, a GB cap and an expiry date per friend — the server cuts them off by itself.
 - **Traffic by program**: see which app eats your subscription's data cap.
 - Signed updates, server passwords encrypted with your Windows account key, no telemetry.
 
@@ -54,7 +53,7 @@
 3. Paste a server link or subscription → press the mountain. Done.
 
 <p align="center">
-  <img src="docs/img/rxvpn-welcome.png" width="640" alt="First run: three steps">
+  <img src="docs/img/rxvpn-welcome.png" width="580" alt="First run: three steps">
 </p>
 
 rxvpn is **portable**: everything lives in the `data` folder next to it. Move it to another PC by copying the folder (or a backup); remove it by deleting the folder. Updates arrive by themselves: once a day rxvpn checks for a new version and installs it on your click — only if the signature matches.
@@ -67,7 +66,9 @@ The interface is in Russian and English; it follows your Windows language, or pi
 
 **Why administrator rights?** Only for Whole PC mode, zapret and tamper-free DNS — they change networking for the whole computer. Browser mode works without them.
 
-**Can rxvpn see my traffic?** No. The VPN and Telegram encrypt traffic themselves; rxvpn collects nothing and sends nothing anywhere.
+**Can rxvpn see my traffic?** No. The protocols encrypt traffic themselves; rxvpn collects nothing and sends nothing anywhere.
+
+**Where do I get a server?** Your own VPS from any host (rxvpn sets it up) or a subscription from a service you trust.
 
 ## For developers
 
@@ -77,4 +78,4 @@ Rust (all logic) + Tauri 2 (window) + [Xray-core](https://github.com/XTLS/Xray-c
 
 rxvpn is licensed under [GPL-3.0](LICENSE).
 
-[Xray-core](https://github.com/XTLS/Xray-core) (MPL-2.0) · [zapret](https://github.com/bol-van/zapret) and [Flowseal strategies](https://github.com/Flowseal/zapret-discord-youtube) (MIT) · [tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy) (MIT) · [Arti](https://gitlab.torproject.org/tpo/core/arti) · [runetfreedom lists](https://github.com/runetfreedom/russia-v2ray-rules-dat) · [Wintun](https://www.wintun.net/)
+[Xray-core](https://github.com/XTLS/Xray-core) (MPL-2.0) · [sing-box](https://github.com/SagerNet/sing-box) (GPL-3.0) · [zapret](https://github.com/bol-van/zapret) and [Flowseal strategies](https://github.com/Flowseal/zapret-discord-youtube) (MIT) · [tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy) (MIT) · [Arti](https://gitlab.torproject.org/tpo/core/arti) · [runetfreedom routing lists](https://github.com/runetfreedom/russia-v2ray-rules-dat) · [Wintun](https://www.wintun.net/)
