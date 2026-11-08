@@ -24,8 +24,9 @@ import sys
 from html.parser import HTMLParser
 
 CYR = re.compile(r'[А-Яа-яЁё]')
-UI_JS = ['ui/app.js', 'ui/i18n.js']
+UI_JS = ['ui/app.js', 'ui/i18n.js', 'ui/mini.js']
 UI_HTML = 'ui/index.html'
+UI_HTMLS = ['ui/index.html', 'ui/mini.html']  # главное окно и мини-окно из трея
 EN_UI = 'ui/locales/en.js'
 EN_PREFIX = 'window.RX_EN = '
 HTML_ATTRS = ('title', 'placeholder', 'aria-label')
@@ -281,8 +282,11 @@ def collect(root):
             errs += e
             for x, w in k.items():
                 keys.setdefault(x, w)
-    for x, w in html_scan(os.path.join(root, UI_HTML)).items():
-        keys.setdefault(x, w)
+    for rel in UI_HTMLS:
+        path = os.path.join(root, rel)
+        if os.path.exists(path):
+            for x, w in html_scan(path).items():
+                keys.setdefault(x, w.replace(UI_HTML, rel))
     return keys, errs
 
 

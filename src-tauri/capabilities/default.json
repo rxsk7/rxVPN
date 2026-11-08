@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Права главного окна",
-  "windows": ["main"],
+  "description": "Права главного окна и мини-окна из трея",
+  "windows": ["main", "mini"],
   "permissions": ["core:default"]
 }

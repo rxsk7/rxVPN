@@ -586,6 +586,52 @@ fn stop_core(st: &AppState) {
     }
 }
 
+/// Горячая клавиша «Подключить / Отключить»: снять прошлую, поставить из настроек (пусто — нет).
+fn apply_hotkey(app: &AppHandle, keys: &str) -> Res<()> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    let keys = keys.trim();
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let sc: Shortcut = keys.parse().map_err(|_| tr!("Горячая клавиша «{keys}» не распознана — например Ctrl+Alt+V"))?;
+    gs.register(sc).map_err(|e| tr!("Горячая клавиша «{keys}» занята другой программой ({e})"))
+}
+
+/// Автоподключение: запустилась программа из списка — подключиться. Только на запуске
+/// (переход «не было → есть»): отключился вручную, пока она открыта, — не лезем обратно.
+fn spawn_app_watch(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut first = true;
+        loop {
+            std::thread::sleep(Duration::from_secs(4));
+            let st = app.state::<AppState>();
+            let want: Vec<String> = st.store.lock().unwrap().settings.connect_apps.iter().map(|a| a.to_ascii_lowercase()).collect();
+            if want.is_empty() {
+                seen.clear();
+                continue;
+            }
+            let now: std::collections::HashSet<String> = winsys::list_processes()
+                .into_iter()
+                .map(|p| p.to_ascii_lowercase())
+                .filter(|p| want.contains(p))
+                .collect();
+            // Уже открытые при старте rxvpn — не повод подключаться (это делает «Автоподключение»).
+            let started: Vec<&String> = if first { Vec::new() } else { now.difference(&seen).collect() };
+            first = false;
+            if let Some(name) = started.first() {
+                if !running(&st) && !st.ztesting.load(Ordering::SeqCst) {
+                    log(&app, tr!("автоподключение: запущена {name} — подключаюсь"));
+                    connect_in_background(app.clone(), true, false);
+                }
+            }
+            seen = now;
+        }
+    });
+}
+
 /// Снять kill switch (интернет снова без ограничений). Не был включён — ничего.
 fn kill_off(app: &AppHandle, st: &AppState, why: &str) {
     if st.kill.lock().unwrap().take().is_some() {
@@ -2733,6 +2779,85 @@ async fn auto_repick(app: &AppHandle, my: u64) {
 
 // ---------------- трей и окно ----------------
 
+/// Когда мини-окно спряталось от потери фокуса (мс с начала эпохи).
+static MINI_HIDDEN_AT: AtomicU64 = AtomicU64::new(0);
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// Мини-окно из трея (ui/mini.html): показать над значком у часов или спрятать.
+/// Создаётся при первом клике и дальше только прячется/показывается.
+fn toggle_mini(app: &AppHandle, at: tauri::PhysicalPosition<f64>) {
+    const W: f64 = 300.0;
+    const H: f64 = 380.0;
+    if let Some(w) = app.get_webview_window("mini") {
+        if w.is_visible().unwrap_or(false) {
+            let _ = w.hide();
+            return;
+        }
+        // Клик по значку сначала уводит фокус — окно уже спряталось от этого же клика: не открываем снова.
+        if now_ms().saturating_sub(MINI_HIDDEN_AT.load(Ordering::SeqCst)) < 350 {
+            return;
+        }
+        place_mini(&w, at, W, H);
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let st = app.state::<AppState>();
+    let mut b = tauri::WebviewWindowBuilder::new(app, "mini", tauri::WebviewUrl::App("mini.html".into()))
+        .title("rxvpn")
+        .inner_size(W, H)
+        .resizable(false)
+        .decorations(false)
+        .transparent(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false);
+    // Та же папка профиля окна, что у главного: у WebView2 одна среда на процесс.
+    if st.paths.portable {
+        b = b.data_directory(webview_dir(&st.paths, winsys::is_admin()));
+    }
+    match b.build() {
+        Ok(w) => {
+            place_mini(&w, at, W, H);
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        Err(e) => {
+            log(app, tr!("мини-окно не открылось: {e}"));
+            show_main(app);
+        }
+    }
+}
+
+/// Над курсором у часов (панель задач обычно внизу), не вылезая за край экрана.
+fn place_mini(w: &tauri::WebviewWindow, at: tauri::PhysicalPosition<f64>, width: f64, height: f64) {
+    let scale = w.scale_factor().unwrap_or(1.0);
+    let (pw, ph) = (width * scale, height * scale);
+    let mut x = at.x - pw / 2.0;
+    let mut y = at.y - ph - 12.0 * scale;
+    if let Ok(Some(m)) = w.current_monitor().or_else(|_| w.primary_monitor()) {
+        let (mx, my) = (m.position().x as f64, m.position().y as f64);
+        let (mw, mh) = (m.size().width as f64, m.size().height as f64);
+        x = x.clamp(mx + 8.0, mx + mw - pw - 8.0);
+        if y < my + 8.0 {
+            y = at.y + 12.0 * scale; // панель задач сверху — открываем вниз
+        }
+        y = y.clamp(my + 8.0, my + mh - ph - 8.0);
+    }
+    let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
+/// Мини-окно → «Открыть rxvpn»: прячем мини, показываем большое.
+#[tauri::command]
+fn show_main_window(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("mini") {
+        let _ = w.hide();
+    }
+    show_main(&app);
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -2753,10 +2878,12 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
+                position,
                 ..
             } = ev
             {
-                show_main(tray.app_handle());
+                // Левый клик — мини-окно (кнопка и состояние); правый — меню, как раньше.
+                toggle_mini(tray.app_handle(), position);
             }
         })
         .build(app)?;
@@ -4287,6 +4414,13 @@ async fn save_settings(app: AppHandle, st: State<'_, AppState>, settings: Settin
         bind_site_servers(&mut settings, &s.servers);
     }
     validate_settings(&settings)?;
+    // Новая горячая клавиша: занята или не распознана — не сохраняем, остаётся прежняя.
+    if settings.hotkey != old.hotkey {
+        if let Err(e) = apply_hotkey(&app, &settings.hotkey) {
+            let _ = apply_hotkey(&app, &old.hotkey);
+            return Err(e);
+        }
+    }
 
     if settings.autostart != old.autostart || (settings.autostart && settings.run_as_admin != old.run_as_admin) {
         apply_autostart(&st, settings.autostart, settings.run_as_admin)?;
@@ -4303,6 +4437,7 @@ async fn save_settings(app: AppHandle, st: State<'_, AppState>, settings: Settin
             s.encrypt_state = false;
             (s.net_profiles, s.trusted_nets, s.home, s.away) = Default::default();
             (s.wl_server, s.wl_server_sub, s.wl_auto) = Default::default();
+            (s.hotkey, s.connect_apps) = Default::default(); // не про Xray — без переподключения
             serde_json::to_value(s).ok()
         };
         strip(&old) != strip(&settings)
@@ -5004,6 +5139,16 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, ev| {
+                    // Зарегистрирована одна клавиша — «Подключить / Отключить», как в трее.
+                    if ev.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        on_tray_menu(app, "toggle");
+                    }
+                })
+                .build(),
+        )
         .manage(state)
         .setup(move |app| {
             seed_bundled_core(app);
@@ -5058,6 +5203,11 @@ pub fn run() {
             spawn_sub_updater(app.handle().clone());
             updui::spawn_daily(app.handle().clone());
             spawn_net_watch(app.handle().clone());
+            spawn_app_watch(app.handle().clone());
+            let hk = app.state::<AppState>().store.lock().unwrap().settings.hotkey.clone();
+            if let Err(e) = apply_hotkey(app.handle(), &hk) {
+                log(app.handle(), e);
+            }
             dohui::spawn_doh_watch(app.handle().clone());
             if app.state::<AppState>().state_locked.load(Ordering::SeqCst) {
                 log(app.handle(), trs!("state.json зашифрован под другой учёткой Windows или на другом компе — открыть его здесь нельзя. \
@@ -5081,6 +5231,21 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Мини-окно прячется, как только кликнули мимо (как окна Wi-Fi и громкости у часов).
+            if window.label() == "mini" {
+                match event {
+                    tauri::WindowEvent::Focused(false) => {
+                        MINI_HIDDEN_AT.store(now_ms(), Ordering::SeqCst);
+                        let _ = window.hide();
+                    }
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    _ => {}
+                }
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let to_tray = window
                     .state::<AppState>()
@@ -5111,6 +5276,7 @@ pub fn run() {
             connect,
             disconnect,
             kill_release,
+            show_main_window,
             select_server,
             delete_server,
             import_text,

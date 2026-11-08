@@ -1934,6 +1934,8 @@ function fillSettings() {
   form.system_proxy.checked = s.system_proxy;
   form.allow_lan.checked = s.allow_lan;
   form.kill_switch.checked = !!s.kill_switch;
+  form.hotkey.value = s.hotkey ?? "";
+  form.connect_apps.value = (s.connect_apps || []).join("\n");
   form.log_level.value = s.log_level;
   form.autostart.checked = s.autostart;
   form.auto_connect.checked = s.auto_connect;
@@ -1977,6 +1979,8 @@ form.onsubmit = async (e) => {
     system_proxy: form.system_proxy.checked,
     allow_lan: form.allow_lan.checked,
     kill_switch: form.kill_switch.checked,
+    hotkey: form.hotkey.value.trim(),
+    connect_apps: form.connect_apps.value.split("\n").map((l) => l.trim()).filter(Boolean),
     log_level: form.log_level.value,
     autostart: form.autostart.checked,
     auto_connect: form.auto_connect.checked,

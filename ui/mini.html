@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>rxvpn</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="mini.css" />
+</head>
+<body class="mini">
+  <!-- Мини-окно из трея: кнопка-гора, состояние, сервер, скорость. Всё остальное — в большом окне. -->
+  <header class="m-top">
+    <span class="m-brand">rxvpn</span>
+    <button class="ghost small" id="m-open" title="Открыть большое окно rxvpn">Открыть rxvpn</button>
+  </header>
+
+  <div class="m-hero">
+    <div class="power-wrap">
+      <button class="power" id="btn-connect" aria-label="Подключить">
+        <img class="k2" src="img/k2-mountain.png" alt="" draggable="false" aria-hidden="true" />
+        <img class="k2-anim" alt="" draggable="false" aria-hidden="true" />
+      </button>
+    </div>
+    <div class="power-label" id="m-state">Не подключено</div>
+    <div class="hero-sub" id="m-sub">Нажми на гору, чтобы подключиться</div>
+  </div>
+
+  <button class="card-row m-server" id="m-server" title="Выбрать сервер — в большом окне">
+    <span class="cr-text">
+      <span class="cur-name" id="m-name">Сервер не выбран</span>
+      <span class="cur-meta" id="m-meta"></span>
+    </span>
+    <span class="chev">›</span>
+  </button>
+
+  <div class="m-speed" id="m-speed">
+    <span><span class="arrow down">↓</span> <span id="m-down">0 Б/с</span></span>
+    <span><span class="arrow up">↑</span> <span id="m-up">0 Б/с</span></span>
+  </div>
+
+  <script src="locales/en.js"></script>
+  <script src="i18n.js"></script>
+  <script src="mini.js"></script>
+</body>
+</html>

@@ -393,6 +393,10 @@
       <p class="hint">Упал VPN — интернет закрывается, пока не подключишься снова: ни одна программа не уйдёт в сеть
         с твоим настоящим IP. Локальная сеть (принтер, роутер) работает. Не работает вместе с «Через zapret, мимо VPN».
         Закрыл rxvpn — блокировка снимается сама.</p>
+      <label>Горячая клавиша «Подключить / Отключить»<input type="text" name="hotkey" placeholder="Ctrl+Alt+V" maxlength="40" spellcheck="false" /></label>
+      <p class="hint">Работает, даже когда окно свёрнуто. Пусто — выключена.</p>
+      <label>Подключаться, когда запускаются программы<textarea name="connect_apps" rows="2" spellcheck="false" placeholder="Discord.exe&#10;cs2.exe"></textarea></label>
+      <p class="hint">По одной на строку. Запустил — rxvpn подключится сам. Отключил вручную, пока программа открыта, — обратно не полезет.</p>
       <label class="check"><input type="checkbox" name="allow_lan" /> Пускать устройства из домашней сети</label>
       <p class="hint">Прокси откроется для всей сети <b>без пароля</b>. Включай только дома, не в кафе и не в общежитии.</p>
       <div class="grid2">

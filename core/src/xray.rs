@@ -89,6 +89,10 @@ pub struct Settings {
     /// Kill switch в TUN: упал Xray — интернет закрыт, пока VPN не вернётся или не нажмут
     /// «Отключить» (core/src/killswitch.rs). Только с правами администратора.
     pub kill_switch: bool,
+    /// Горячая клавиша «Подключить / Отключить» (как в трее), например "Ctrl+Alt+V". Пусто — выключена.
+    pub hotkey: String,
+    /// Запустилась одна из этих программ (имя exe) — подключиться самому.
+    pub connect_apps: Vec<String>,
     /// Запускаться вместе с Windows (свёрнутым в трей).
     pub autostart: bool,
     /// Подключаться к выбранному серверу сразу при запуске программы.
@@ -528,6 +532,8 @@ impl Default for Settings {
             proxy: Vec::new(),
             tun: false,
             kill_switch: false,
+            hotkey: "Ctrl+Alt+V".into(),
+            connect_apps: Vec::new(),
             autostart: false,
             auto_connect: false,
             close_to_tray: true,
@@ -949,6 +955,20 @@ pub fn parse_hosts(lines: &[String]) -> Result<serde_json::Map<String, Value>, S
 pub fn validate_settings(s: &Settings) -> Result<(), String> {
     if crate::i18n::sanitize(&s.lang) != s.lang {
         return Err(trs!("Язык: неизвестное значение").into());
+    }
+    if s.hotkey.len() > 40 || !s.hotkey.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b' ') {
+        return Err(trs!("Горячая клавиша: например Ctrl+Alt+V").into());
+    }
+    if s.connect_apps.len() > 50 {
+        return Err(trs!("Автоподключение: не больше 50 программ").into());
+    }
+    for a in &s.connect_apps {
+        let ok = a.len() <= 64
+            && a.to_ascii_lowercase().ends_with(".exe")
+            && a.chars().all(|c| c.is_alphanumeric() || " ._-()".contains(c));
+        if !ok {
+            return Err(tr!("Автоподключение: «{a}» — нужно имя программы, например Discord.exe"));
+        }
     }
     if s.tg_proxy && (s.tg_port < 1024 || s.tg_port == s.socks_port || s.tg_port == s.http_port) {
         return Err(trs!("Порт Telegram: от 1024 и не такой, как SOCKS/HTTP").into());
@@ -2147,6 +2167,18 @@ mod tests {
     /// Куда уйдёт трафик по правилу: "proxy" / "direct" / "block" / "auto"(балансировщик).
     fn dest(r: &Value) -> String {
         r["outboundTag"].as_str().or(r["balancerTag"].as_str()).unwrap_or("?").to_string()
+    }
+
+    #[test]
+    fn hotkey_and_connect_apps_are_checked() {
+        let ok = Settings { hotkey: "Ctrl+Alt+V".into(), connect_apps: vec!["Discord.exe".into(), "cs2.exe".into(), "Telegram (1).exe".into()], ..Default::default() };
+        assert!(validate_settings(&ok).is_ok());
+        assert!(validate_settings(&Settings { hotkey: String::new(), ..Default::default() }).is_ok(), "пусто — выключена");
+        for bad in [r"C:\Games\cs2.exe", "../x.exe", "Discord", "a\"b.exe", "x.exe;calc"] {
+            assert!(validate_settings(&Settings { connect_apps: vec![bad.into()], ..Default::default() }).is_err(), "{bad}");
+        }
+        assert!(validate_settings(&Settings { hotkey: "Ctrl+Alt+V; rm".into(), ..Default::default() }).is_err());
+        assert!(validate_settings(&Settings { connect_apps: vec!["a.exe".into(); 51], ..Default::default() }).is_err());
     }
 
     #[test]

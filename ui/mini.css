@@ -1,0 +1,26 @@
+/* Мини-окно из трея (ui/mini.html): компактно, те же цвета и кнопка-гора, что в большом окне. */
+body.mini {
+  flex-direction: column; overflow: hidden; height: 100%;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px 14px 14px; gap: 10px; user-select: none;
+}
+.m-top { display: flex; align-items: center; justify-content: space-between; }
+.m-brand { font: 600 14px var(--font-display); }
+.m-hero { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; min-width: 0; }
+/* длинные строки — многоточием по ширине окна, а не раздвигают его */
+.m-hero > *, .mini .m-server, .mini .cr-text { max-width: 100%; min-width: 0; }
+.mini .power-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini .power-wrap { width: 132px; height: 132px; }
+.mini .power, .mini .power:hover, .mini .power.on, .mini .power.busy {
+  width: 104px; height: 104px; padding: 0; position: relative; overflow: hidden; border-radius: 50%;
+  background: #0a338a; color: transparent; animation: none;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .4), 0 0 0 1px var(--line);
+}
+.mini .power.on { box-shadow: 0 0 0 2px var(--green), 0 12px 36px var(--glow); }
+.mini .power-label { font: 700 19px/1.2 var(--font-display); letter-spacing: -.02em; margin-top: 4px; }
+.mini .power-label.on { color: var(--green); }
+.mini .power-label.busy { color: var(--orange); }
+.mini .hero-sub { font-size: 12px; text-align: center; }
+.mini .m-server { padding: 10px 12px; background: var(--card-2); box-shadow: none; }
+.m-speed { display: flex; justify-content: space-between; font: 600 13px var(--font-display); font-variant-numeric: tabular-nums; padding: 0 2px; }
+.m-speed.idle { opacity: .35; }

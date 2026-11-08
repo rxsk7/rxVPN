@@ -24,8 +24,9 @@ class H(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
-        if path in ("/", "/index.html"):
-            html = open(os.path.join(UI, "index.html"), encoding="utf-8").read()
+        if path in ("/", "/index.html", "/mini.html"):
+            page = "mini.html" if path == "/mini.html" else "index.html"
+            html = open(os.path.join(UI, page), encoding="utf-8").read()
             settings = open(os.path.join(ROOT, "settings.json"), encoding="utf-8").read()
             inject = (f"<script>window.__RX_SETTINGS={settings};</script>"
                       f"<script src=\"/__dev/stub.js\"></script>\n")
