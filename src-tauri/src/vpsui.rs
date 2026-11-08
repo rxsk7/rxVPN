@@ -195,6 +195,9 @@ pub(crate) async fn vps_restart(app: AppHandle, st: State<'_, AppState>, id: Str
 pub(crate) async fn vps_update(app: AppHandle, st: State<'_, AppState>, id: String) -> Res<View> {
     let _b = busy(&st)?;
     let (mut v, sec) = get(&st, &id)?;
+    // Сначала конфиг — в нынешний вид (rxvpn мог поменять его после установки): новый Xray
+    // проверяет конфиг перед заменой, и устаревшая настройка не дала бы обновиться.
+    vps::apply(&v, &sec).await?;
     log(&app, tr!("свой сервер «{}»: качаю свежий Xray…", v.name));
     let f = fetcher(probe_proxy(&st));
     let ver = vps::update_xray(&v, &sec, &f).await?;

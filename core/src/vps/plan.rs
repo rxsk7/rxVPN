@@ -140,8 +140,9 @@ pub fn server_config(r: &Reality, clients: &[Client], own_ips: &[String], exit: 
              "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true}}
         ],
         "outbounds": [
-            {"tag": "direct", "protocol": "freedom", "settings": {"domainStrategy": "UseIP",
-                "finalRules": [{"action": "block", "ip": block}]}},
+            // domainStrategy — в sockopt: в freedom.settings Xray 26 её объявил устаревшей и уберёт.
+            {"tag": "direct", "protocol": "freedom", "settings": {"finalRules": [{"action": "block", "ip": block}]},
+                "streamSettings": {"sockopt": {"domainStrategy": "UseIP"}}},
             {"tag": "block", "protocol": "blackhole"}
         ],
         "routing": {
@@ -545,6 +546,10 @@ mod tests {
         assert_eq!(c["inbounds"][0]["listen"], "127.0.0.1", "API — только на самом сервере");
         assert_eq!(c["routing"]["rules"][1]["outboundTag"], "block");
         assert_eq!(c["log"]["access"], "none");
+        let direct = &c["outbounds"][0];
+        assert!(direct["settings"]["domainStrategy"].is_null(), "устаревшее место — пусто");
+        assert_eq!(direct["streamSettings"]["sockopt"]["domainStrategy"], "UseIP");
+        assert!(direct["settings"]["finalRules"][0]["ip"].is_array(), "локалка сервера закрыта и на выходе");
         assert_eq!(c["routing"]["rules"].as_array().unwrap().len(), 3, "без моста — выход прямо с сервера");
 
         // Мост: блокировки — как раньше и раньше выхода, остальное — на выходной сервер.

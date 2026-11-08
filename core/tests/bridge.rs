@@ -25,7 +25,12 @@ fn bridge_chain_live() {
         return;
     };
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let start = |cfg: &serde_json::Value| XrayProcess::start(&dir, &serde_json::to_vec(cfg).unwrap(), |_| {}, || {}).unwrap();
+    // Логи серверов — проверить, что Xray не ругается на устаревшие настройки.
+    let logs = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let start = |cfg: &serde_json::Value| {
+        let l = logs.clone();
+        XrayProcess::start(&dir, &serde_json::to_vec(cfg).unwrap(), move |x| l.lock().unwrap().push(x), || {}).unwrap()
+    };
 
     // Выходной сервер.
     let (ex_uuid, ex_port) = (plan::uuid_v4(), free_port());
@@ -57,6 +62,10 @@ fn bridge_chain_live() {
     let ok = get();
     eprintln!("клиент → мост → выход: {ok:?}");
     assert_eq!(ok.unwrap(), 204, "цепочка возит трафик");
+    let local = rt.block_on(async { c.get(format!("http://127.0.0.1:{ex_port}/")).send().await.map(|r| r.status().as_u16()) });
+    assert!(local.is_err(), "локалка сервера через мост закрыта: {local:?}");
+    let warn: Vec<String> = logs.lock().unwrap().iter().filter(|l| l.contains("deprecated")).cloned().collect();
+    assert!(warn.is_empty(), "Xray ругается на устаревшее: {warn:?}");
 
     drop(exit_proc);
     std::thread::sleep(Duration::from_millis(800));
