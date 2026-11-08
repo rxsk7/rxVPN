@@ -5,6 +5,10 @@
 <h1 align="center">rxvpn</h1>
 
 <p align="center">
+  <b>Русский</b> · <a href="README.en.md">English</a>
+</p>
+
+<p align="center">
   <b>Интернет без блокировок — одной кнопкой.</b><br>
   VPN-клиент для Windows, который сам обходит блокировки.
 </p>
@@ -62,6 +66,9 @@
 
 Rust (вся логика) + Tauri 2 (окно) + [Xray-core](https://github.com/XTLS/Xray-core) (протоколы). Как устроено, как собрать, тесты и подробности безопасности — в [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-## Спасибо
+## Лицензия и спасибо
+
+rxvpn распространяется по лицензии [GPL-3.0](LICENSE).
+
 
 [Xray-core](https://github.com/XTLS/Xray-core) (MPL-2.0) · [zapret](https://github.com/bol-van/zapret) и [стратегии Flowseal](https://github.com/Flowseal/zapret-discord-youtube) (MIT) · [tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy) (MIT) · [Arti](https://gitlab.torproject.org/tpo/core/arti) · [списки runetfreedom](https://github.com/runetfreedom/russia-v2ray-rules-dat) · [Wintun](https://www.wintun.net/)
