@@ -24,7 +24,7 @@
 ## Features
 
 **Connecting**
-- Modern protocols: **VLESS + Reality**, xHTTP, VMess, Trojan, Shadowsocks, **Hysteria2**.
+- Modern protocols: **VLESS + Reality**, xHTTP, VMess, Trojan, Shadowsocks, **Hysteria2**, **TUIC** (via sing-box).
 - Subscriptions from Marzban, Remnawave, 3x-ui and any VPN provider — with remaining traffic and expiry date.
 - **⚡ Auto** picks the fastest stable server and switches if it goes down.
 - Modes: **Browser** (system proxy), **Whole PC** (TUN — games and any app) and **No VPN**.
@@ -36,7 +36,8 @@
 - **YouTube and Discord without a VPN** via zapret (DPI bypass): faster and uses no VPN traffic. rxvpn picks the strategy for you.
 - **Telegram without a VPN** with one switch — Telegram opens with “Connect proxy” by itself.
 - **“Why won't this site open?”** checks in 10 seconds what your ISP did to a site and suggests the fix.
-- **Whitelist mode**: when the mobile network only lets allowed sites through, rxvpn switches to the right server.
+- **Whitelist mode**: when the mobile network only lets allowed sites through, rxvpn finds a server that gets through —
+  or helps you build a **bridge** through your own VPS in a Russian cloud.
 
 **Protection**
 - **Kill switch**: if the VPN drops, the internet closes — no app reaches the network with your real IP.
