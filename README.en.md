@@ -68,6 +68,8 @@ The interface is in Russian and English; it follows your Windows language, or pi
 
 **Can rxvpn see my traffic?** No. The protocols encrypt traffic themselves; rxvpn collects nothing and sends nothing anywhere.
 
+**Found a bug?** In rxvpn: More → Report a problem → Open on GitHub. The report is built without passwords or server addresses and copied — just paste it into the form.
+
 **Where do I get a server?** Your own VPS from any host (rxvpn sets it up) or a subscription from a service you trust.
 
 ## For developers

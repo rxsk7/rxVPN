@@ -248,6 +248,24 @@ pub fn open_tg_link(url: &str) -> Result<(), String> {
     if !has_url_handler("tg") {
         return Err(trs!("Telegram Desktop не установлен (никто не открывает ссылки tg://)").into());
     }
+    open_unelevated(url, || trs!("Проводник Windows не запущен — ссылку не открываю (она открылась бы с правами администратора). Ссылка скопирована: вставь её в Telegram").into())
+}
+
+/// Страница «новая проблема» на GitHub (кнопка в окне отчёта). Только github.com/…/issues/new
+/// и только безопасные символы: всё остальное в ссылке — уже %-закодировано.
+pub fn open_issue_link(url: &str) -> Result<(), String> {
+    let ok = url.strip_prefix("https://github.com/").and_then(|r| r.split_once("/issues/new")).is_some_and(|(repo, _)| {
+        repo.split('/').count() == 2 && repo.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
+    });
+    if !ok || !url.bytes().all(|b| b.is_ascii_alphanumeric() || b"/:?=&.%_-+".contains(&b)) {
+        return Err(trs!("не та ссылка").into());
+    }
+    open_unelevated(url, || trs!("Проводник Windows не запущен — ссылку не открываю (она открылась бы с правами администратора)").into())
+}
+
+/// Открыть ссылку так, чтобы программа для неё (Telegram, браузер) запустилась без прав
+/// администратора, даже когда они есть у rxvpn. `no_shell` — текст, если Проводника нет.
+fn open_unelevated(url: &str, no_shell: impl FnOnce() -> String) -> Result<(), String> {
     // От администратора сами не открываем: обработчик tg:// Windows берёт и из HKCU\Software\Classes,
     // куда пишет любая программа пользователя, — она запустилась бы с правами администратора.
     // Отдаём ссылку Проводнику: новый explorer.exe передаёт её уже запущенному Проводнику
@@ -258,9 +276,7 @@ pub fn open_tg_link(url: &str) -> Result<(), String> {
             match shell_elevated() {
                 // Нет Проводника (другая оболочка, упал) — новый explorer.exe открыл бы ссылку
                 // с нашими правами. Не открываем.
-                None => {
-                    return Err(trs!("Проводник Windows не запущен — ссылку не открываю (она открылась бы с правами администратора). Ссылка скопирована: вставь её в Telegram").into());
-                }
+                None => return Err(no_shell()),
                 // Проводник без прав: отдаём ему — Telegram откроется без прав администратора.
                 // `explorer.exe ссылка` свежая Windows 11 уже не открывает (показывает
                 // «Документы»), поэтому просим сам Проводник через его COM-интерфейс.
@@ -280,11 +296,11 @@ pub fn open_tg_link(url: &str) -> Result<(), String> {
         let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
         let (verb, file) = (wide("open"), wide(url));
         let r = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
-        // Больше 32 — открылось; 31 (SE_ERR_NOASSOC) — никто не умеет tg://.
+        // Больше 32 — открылось; 31 (SE_ERR_NOASSOC) — никто не умеет такие ссылки.
         if (r as isize) > 32 {
             Ok(())
         } else if r as isize == 31 {
-            Err(trs!("Telegram Desktop не установлен (никто не открывает ссылки tg://)").into())
+            Err(trs!("нет программы, которая открывает такие ссылки").into())
         } else {
             Err(tr!("не открылось (код {})", r as isize))
         }
@@ -780,7 +796,7 @@ mod url_handler_tests {
     fn handlers() {
         assert!(super::has_url_handler("https"));
         assert!(!super::has_url_handler("rxvpn-no-such-scheme"));
-        eprintln!("tg:// на этом ПК: {}", super::has_url_handler("tg"));
+        eprintln!("tg:// на этом ПК: {}", super::has_url_handler("tg")); // i18n-skip: тест
     }
 }
 
@@ -791,5 +807,30 @@ mod shell_exec_tests {
     #[ignore]
     fn open_as_user_live() {
         super::shell_execute_as_user("tg://resolve?domain=durov&post=1").unwrap();
+    }
+}
+
+#[cfg(test)]
+mod issue_link_tests {
+    #[test]
+    fn only_github_new_issue() {
+        // Чужие ссылки не открываются даже не дойдя до Windows.
+        for bad in [
+            "https://evil.com/rxsk7/rxVPN/issues/new",
+            "https://github.com/rxsk7/rxVPN/releases",
+            "https://github.com/a/b/c/issues/new",
+            "https://github.com/rxsk7/rxVPN/issues/new?body=a b",
+            "file:///C:/Windows/System32/calc.exe",
+        ] {
+            assert!(super::open_issue_link(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// Живая проверка: откроет форму новой проблемы в браузере пользователя.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn open_issue_live() {
+        super::open_issue_link("https://github.com/rxsk7/rxVPN/issues/new?title=rxvpn%200.16.3%3A%20&body=%2A%2ATest%2A%2A").unwrap();
     }
 }

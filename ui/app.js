@@ -2067,11 +2067,11 @@ $("btn-config-close").onclick = () => $("dlg-config").close();
 async function openReport(error) {
   const pre = $("report-text");
   pre.textContent = t("Собираю…");
-  $("btn-report-copy").disabled = $("btn-report-save").disabled = true;
+  $("btn-report-copy").disabled = $("btn-report-save").disabled = $("btn-report-gh").disabled = true;
   if (!$("dlg-report").open) $("dlg-report").showModal();
   try {
     pre.textContent = await call("problem_report", { error: error || null });
-    $("btn-report-copy").disabled = $("btn-report-save").disabled = false;
+    $("btn-report-copy").disabled = $("btn-report-save").disabled = $("btn-report-gh").disabled = false;
   } catch (e) { pre.textContent = t("Отчёт не собрался: ") + e; }
 }
 $("btn-report").onclick = () => openReport(null);
@@ -2086,6 +2086,9 @@ $("btn-report-copy").onclick = async () => {
 };
 $("btn-report-save").onclick = async () => {
   try { if (await call("problem_report_save")) toast(t("Отчёт сохранён")); } catch {}
+};
+$("btn-report-gh").onclick = async () => {
+  try { await call("problem_report_github"); toast(t("Отчёт скопирован — в открывшейся форме на GitHub вставь его (Ctrl+V)")); } catch {}
 };
 $("btn-report-close").onclick = () => $("dlg-report").close();
 

@@ -207,6 +207,39 @@ pub(crate) async fn problem_report_copy(st: State<'_, AppState>) -> Res<()> {
     arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| tr!("буфер обмена: {e}"))
 }
 
+/// «Открыть на GitHub»: отчёт — в буфер (в ссылку он не влезет: у GitHub предел длины),
+/// а в браузере — форма новой проблемы с заготовкой, куда его вставить.
+#[tauri::command]
+pub(crate) async fn problem_report_github(st: State<'_, AppState>) -> Res<()> {
+    let repo = rxvpn_core::update::REPO.ok_or(trs!("в этой сборке нет адреса репозитория"))?;
+    let text = last(&st)?;
+    arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| tr!("буфер обмена: {e}"))?;
+    let body = format!(
+        "{}
+
+
+{}
+
+
+<details><summary>{}</summary>
+
+```
+{}
+```
+
+</details>
+",
+        trs!("**Что случилось:**"),
+        trs!("**Что делал перед этим:**"),
+        trs!("Отчёт rxvpn"),
+        trs!("(вставь сюда отчёт: Ctrl+V — он уже скопирован)"),
+    );
+    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+    let title = format!("rxvpn {}: ", env!("CARGO_PKG_VERSION"));
+    let url = format!("https://github.com/{repo}/issues/new?title={}&body={}", enc(&title), enc(&body));
+    winsys::open_issue_link(&url)
+}
+
 /// Сохранить показанный отчёт в файл (.txt, UTF-8 с BOM и CRLF — для Блокнота).
 #[tauri::command]
 pub(crate) async fn problem_report_save(app: AppHandle, st: State<'_, AppState>) -> Res<Option<String>> {

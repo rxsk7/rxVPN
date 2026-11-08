@@ -5491,6 +5491,7 @@ pub fn run() {
             speed_all,
             speed_all_cancel,
             reportui::problem_report_copy,
+            reportui::problem_report_github,
             reportui::problem_report_save,
             wl_check,
             services_list,
