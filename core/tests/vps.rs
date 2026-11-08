@@ -74,13 +74,20 @@ fn vps_install_live() {
         assert!(r.is_err(), "{local} с сервера должно быть закрыто: {r:?}");
     }
 
-    // 5. Статистика (с последнего перезапуска Xray), друг: свой UUID, выключение.
+    // 5. Статистика (накопительно — скрипт лимитов), друг: свой UUID, лимиты, выключение.
     let st = rt.block_on(vps::traffic(&v, &sec)).unwrap();
     eprintln!("трафик: {st:?}");
-    assert!(st.get(vps::plan::OWNER_EMAIL).is_some_and(|(u, d)| *u > 0 && *d > 0), "трафик хозяина посчитан");
-    v.friends.push(vps::Friend { id: vps::plan::friend_id(), name: "Петя".into(), uuid: vps::plan::uuid_v4(), enabled: true });
+    assert!(st.get(vps::plan::OWNER_EMAIL).is_some_and(|u| u.up > 0 && u.down > 0), "трафик хозяина посчитан");
+    v.friends.push(vps::Friend { id: vps::plan::friend_id(), name: "Петя".into(), uuid: vps::plan::uuid_v4(), enabled: true, limit_gb: 0, expires: 0 });
     rt.block_on(vps::apply(&v, &sec)).unwrap();
     assert!(v.sane());
+    // Срок вышел — сервер (скрипт лимитов, его запускает apply) помечает друга отключённым.
+    v.friends[0].expires = 1;
+    rt.block_on(vps::apply(&v, &sec)).unwrap();
+    let st = rt.block_on(vps::traffic(&v, &sec)).unwrap();
+    assert!(st.get(&v.friends[0].email()).is_some_and(|u| u.blocked), "просроченный друг отключён сервером: {st:?}");
+    rt.block_on(vps::reset_usage(&v, &sec, &v.friends[0])).unwrap();
+    v.friends[0].expires = 0;
     v.friends[0].enabled = false;
     rt.block_on(vps::apply(&v, &sec)).unwrap();
 
