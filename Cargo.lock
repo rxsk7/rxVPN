@@ -5429,7 +5429,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rxvpn"
-version = "0.14.2"
+version = "0.15.0"
 dependencies = [
  "arboard",
  "dirs 6.0.0",
@@ -5449,7 +5449,7 @@ dependencies = [
 
 [[package]]
 name = "rxvpn-core"
-version = "0.14.2"
+version = "0.15.0"
 dependencies = [
  "aes 0.8.4",
  "arti-client",
@@ -5485,7 +5485,7 @@ dependencies = [
 
 [[package]]
 name = "rxvpn-i18n-macros"
-version = "0.14.2"
+version = "0.15.0"
 dependencies = [
  "serde_json",
 ]

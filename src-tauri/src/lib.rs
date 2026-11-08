@@ -152,6 +152,8 @@ struct AppState {
     zapret_broken: AtomicBool,
     /// Kill switch (режим «Весь комп»): фильтры WFP держатся, пока он здесь (core/src/killswitch.rs).
     kill: Mutex<Option<rxvpn_core::killswitch::KillSwitch>>,
+    /// Запасные протоколы того же сервера, уже пробованные после сбоя (сброс — reset_auto).
+    fallback_tried: Mutex<std::collections::HashSet<String>>,
     dns_leak: AtomicBool,
     /// Стабильность серверов (data\stats.json) и есть ли несохранённое.
     stats: Mutex<rxvpn_core::stats::Stats>,
@@ -1101,6 +1103,7 @@ fn reset_auto(st: &AppState) {
     *st.auto_prefer.lock().unwrap() = None;
     st.auto_bad.lock().unwrap().clear();
     st.auto_down.store(false, Ordering::SeqCst);
+    st.fallback_tried.lock().unwrap().clear();
 }
 
 /// Сбои «Авто» в тегах текущего запуска (храним по id — теги node-N могут
@@ -1311,6 +1314,31 @@ fn spawn_monitor(app: AppHandle, info: RunInfo) {
                             st.auto_down.store(true, Ordering::SeqCst);
                         }
                     } else if !down {
+                        // Тот же сервер другим протоколом (VLESS не пускают — пробуем Hysteria2 и т.п.).
+                        // Каждый вариант — один раз, пока человек сам не выберет/подключит заново.
+                        let sib = info.id_of(&active).and_then(|cid| {
+                            let mut tried = st.fallback_tried.lock().unwrap();
+                            tried.insert(cid.clone());
+                            let s = st.store.lock().unwrap();
+                            s.same_server_other_protocol(&cid, &tried).map(|n| (n.id.clone(), n.name.clone()))
+                        });
+                        if let Some((sid, sname)) = sib {
+                            st.fallback_tried.lock().unwrap().insert(sid.clone());
+                            st.store.lock().unwrap().selected = Some(sid);
+                            persist(&st);
+                            log(&app, tr!("«{name}» не отвечает — пробую тот же сервер другим протоколом: «{sname}»"));
+                            notify(&app, tr!("«{name}» не отвечает"), tr!("Пробую тот же сервер другим протоколом: «{sname}»"));
+                            let a = app.clone();
+                            let tun = st.tun_active.load(Ordering::SeqCst);
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = start_core_blocking(&a, tun || winsys::is_admin()).await {
+                                    log(&a, tr!("запасной протокол не запустился: {e}"));
+                                }
+                                refresh_tray(&a);
+                                changed(&a);
+                            });
+                            break;
+                        }
                         notify(
                             &app,
                             tr!("«{name}» не отвечает"),
@@ -5122,6 +5150,7 @@ pub fn run() {
         wl_busy: AtomicBool::new(false),
         zapret_broken: AtomicBool::new(false),
         kill: Mutex::new(None),
+        fallback_tried: Mutex::new(Default::default()),
         dns_leak: AtomicBool::new(false),
         stats: Mutex::new(stats),
         stats_dirty: AtomicBool::new(false),

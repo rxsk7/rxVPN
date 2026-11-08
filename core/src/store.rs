@@ -220,6 +220,22 @@ impl Store {
         std::fs::rename(tmp, path)
     }
 
+    /// Запасной вариант того же сервера: та же подписка и тот же адрес, но другой протокол
+    /// или порт (у сервисов часто есть и VLESS, и Hysteria2 на одной машине). Сначала —
+    /// другой протокол, потом — другой порт. `tried` — уже пробованные в этой сессии.
+    pub fn same_server_other_protocol(&self, id: &str, tried: &std::collections::HashSet<String>) -> Option<&Node> {
+        let cur = self.servers.iter().find(|n| n.id == id)?;
+        let mut cands: Vec<&Node> = self
+            .servers
+            .iter()
+            .filter(|n| n.id != cur.id && !tried.contains(&n.id))
+            .filter(|n| n.sub_id == cur.sub_id && n.address.eq_ignore_ascii_case(&cur.address))
+            .filter(|n| n.protocol != cur.protocol || n.port != cur.port)
+            .collect();
+        cands.sort_by_key(|n| (n.protocol == cur.protocol, n.port == cur.port));
+        cands.first().copied()
+    }
+
     pub fn is_auto(&self) -> bool {
         self.selected.as_deref() == Some(AUTO_ID)
     }
@@ -587,6 +603,27 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn fallback_prefers_other_protocol_then_other_port() {
+        let mut st = Store::default();
+        st.import_links(
+            "vless://u@nl.example.com:443?type=tcp&security=reality&pbk=K&sid=a&sni=x.com#VLESS\n\
+             vless://u@nl.example.com:2083?type=tcp&security=reality&pbk=K&sid=a&sni=x.com#VLESS-2083\n\
+             trojan://p@NL.example.com:8443#Trojan\n\
+             trojan://p@de.example.com:443#DE",
+        );
+        let id = |name: &str| st.servers.iter().find(|n| n.name == name).unwrap().id.clone();
+        let mut tried = std::collections::HashSet::new();
+        let first = st.same_server_other_protocol(&id("VLESS"), &tried).unwrap();
+        assert_eq!(first.name, "Trojan", "сначала другой протокол того же адреса (регистр не важен)");
+        tried.insert(first.id.clone());
+        let second = st.same_server_other_protocol(&id("VLESS"), &tried).unwrap();
+        assert_eq!(second.name, "VLESS-2083", "потом тот же протокол на другом порту");
+        tried.insert(second.id.clone());
+        assert!(st.same_server_other_protocol(&id("VLESS"), &tried).is_none(), "другой сервер (DE) — не запасной");
+        assert!(st.same_server_other_protocol(&id("DE"), &Default::default()).is_none());
+    }
 
     #[test]
     fn first_run_gets_random_ports_and_encryption() {
