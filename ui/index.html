@@ -339,6 +339,7 @@
             <button class="ghost nav-row" id="btn-real"><span>Задержка до сервера</span><span class="delay-res" id="real-res"></span></button>
             <button class="ghost nav-row" id="btn-ip"><span>Мой IP и утечка DNS</span></button>
             <button class="ghost nav-row" id="btn-speed"><span>Скорость</span></button>
+            <button class="ghost nav-row" id="btn-apps-traffic"><span>Трафик по программам</span><span class="nav-meta">кто сколько качает</span></button>
           </div>
         </div>
         <div class="group">
@@ -898,6 +899,21 @@
   </dialog>
 
   <!-- На телефон -->
+  <dialog id="dlg-apps-traffic">
+    <div class="dlg">
+      <h2>Трафик по программам</h2>
+      <p class="hint">Сколько скачала и отправила каждая программа, пока открыто это окно. Считает сама Windows —
+        нужны права администратора. Пригодится, когда у подписки лимит трафика.</p>
+      <div class="at-list" id="at-list"></div>
+      <p class="hint" id="at-status"></p>
+      <div class="dlg-actions">
+        <button type="button" class="ghost" id="btn-at-reset">Сбросить</button>
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-at-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="dlg-phone">
     <div class="dlg qr-dlg">
       <h2>На телефон</h2>

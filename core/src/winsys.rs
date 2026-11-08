@@ -524,12 +524,18 @@ pub fn list_processes() -> Vec<String> {
 
 #[cfg(windows)]
 fn imp_list_processes() -> Vec<String> {
+    process_names().into_values().collect()
+}
+
+/// Запущенные процессы: номер → имя exe (снимок Toolhelp).
+#[cfg(windows)]
+pub fn process_names() -> std::collections::HashMap<u32, String> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     };
-    let mut out = Vec::new();
+    let mut out = std::collections::HashMap::new();
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE {
@@ -540,12 +546,17 @@ fn imp_list_processes() -> Vec<String> {
         let mut ok = Process32FirstW(snap, &mut e) != 0;
         while ok {
             let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
-            out.push(String::from_utf16_lossy(&e.szExeFile[..len]));
+            out.insert(e.th32ProcessID, String::from_utf16_lossy(&e.szExeFile[..len]));
             ok = Process32NextW(snap, &mut e) != 0;
         }
         CloseHandle(snap);
     }
     out
+}
+
+#[cfg(not(windows))]
+pub fn process_names() -> std::collections::HashMap<u32, String> {
+    Default::default()
 }
 
 #[cfg(not(windows))]

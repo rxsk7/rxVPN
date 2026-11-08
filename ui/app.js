@@ -2836,3 +2836,39 @@ $("btn-upd-apply").onclick = async () => {
   try { await call("update_apply"); } catch { $("upd-state").textContent = t("Не обновилось — подробности в логе"); }
 };
 $("btn-settings").addEventListener("click", () => { call("update_check").then(showUpd).catch(() => {}); });
+
+// ---------- трафик по программам (Ещё → «Трафик по программам») ----------
+// Подсчёт идёт, пока окно открыто: закрыли — сессия ETW останавливается (app_traffic_stop).
+let atTimer = null;
+async function atRefresh() {
+  let list;
+  try { list = await invoke("app_traffic"); }
+  catch (e) {
+    $("at-status").textContent = String(e);
+    $("at-list").replaceChildren();
+    clearInterval(atTimer); atTimer = null;
+    return;
+  }
+  const max = Math.max(1, ...list.map((a) => a.up + a.down));
+  $("at-list").replaceChildren(...list.slice(0, 30).map((a) => {
+    const row = el("div", "at-row");
+    const bar = el("span", "at-bar");
+    bar.style.width = Math.max(2, Math.round(((a.up + a.down) / max) * 100)) + "%";
+    row.append(el("span", "at-name", a.name), el("span", "at-val", `↓ ${fmtBytes(a.down)}  ↑ ${fmtBytes(a.up)}`), bar);
+    return row;
+  }));
+  $("at-status").textContent = list.length ? t("Обновляется каждые 2 секунды") : t("Пока тихо — открой сайт или запусти загрузку");
+}
+$("btn-apps-traffic").onclick = () => {
+  $("dlg-apps-traffic").showModal();
+  $("at-status").textContent = t("Включаю подсчёт…");
+  atRefresh();
+  clearInterval(atTimer);
+  atTimer = setInterval(atRefresh, 2000);
+};
+$("btn-at-reset").onclick = async () => { await invoke("app_traffic_stop").catch(() => {}); atRefresh(); };
+$("btn-at-close").onclick = () => $("dlg-apps-traffic").close();
+$("dlg-apps-traffic").addEventListener("close", () => {
+  clearInterval(atTimer); atTimer = null;
+  invoke("app_traffic_stop").catch(() => {});
+});

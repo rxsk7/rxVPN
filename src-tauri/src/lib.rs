@@ -154,6 +154,8 @@ struct AppState {
     kill: Mutex<Option<rxvpn_core::killswitch::KillSwitch>>,
     /// Запасные протоколы того же сервера, уже пробованные после сбоя (сброс — reset_auto).
     fallback_tried: Mutex<std::collections::HashSet<String>>,
+    /// Трафик по программам: сессия ETW, пока открыто окно (app_traffic / app_traffic_stop).
+    app_traffic: Mutex<Option<rxvpn_core::apptraffic::AppTraffic>>,
     dns_leak: AtomicBool,
     /// Стабильность серверов (data\stats.json) и есть ли несохранённое.
     stats: Mutex<rxvpn_core::stats::Stats>,
@@ -3275,6 +3277,23 @@ async fn connect(app: AppHandle, st: State<'_, AppState>) -> Res<View> {
     Ok(view(&st))
 }
 
+/// Трафик по программам с момента включения (включается при первом вызове).
+#[tauri::command]
+async fn app_traffic(st: State<'_, AppState>) -> Res<Vec<rxvpn_core::apptraffic::AppUsage>> {
+    let mut g = st.app_traffic.lock().unwrap();
+    if g.is_none() {
+        *g = Some(rxvpn_core::apptraffic::AppTraffic::start()?);
+    }
+    Ok(g.as_ref().map(|t| t.snapshot()).unwrap_or_default())
+}
+
+/// Окно закрыли или «Сбросить» — остановить подсчёт (следующий вызов начнёт с нуля).
+#[tauri::command]
+async fn app_traffic_stop(st: State<'_, AppState>) -> Res<()> {
+    st.app_traffic.lock().unwrap().take();
+    Ok(())
+}
+
 /// «Открыть интернет»: Xray упал, kill switch держит блокировку — снять её, не подключаясь.
 #[tauri::command]
 async fn kill_release(app: AppHandle, st: State<'_, AppState>) -> Res<View> {
@@ -5151,6 +5170,7 @@ pub fn run() {
         zapret_broken: AtomicBool::new(false),
         kill: Mutex::new(None),
         fallback_tried: Mutex::new(Default::default()),
+        app_traffic: Mutex::new(None),
         dns_leak: AtomicBool::new(false),
         stats: Mutex::new(stats),
         stats_dirty: AtomicBool::new(false),
@@ -5305,6 +5325,8 @@ pub fn run() {
             connect,
             disconnect,
             kill_release,
+            app_traffic,
+            app_traffic_stop,
             show_main_window,
             select_server,
             delete_server,

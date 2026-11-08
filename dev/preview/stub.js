@@ -43,6 +43,7 @@
     connect: () => new Promise((r) => setTimeout(() => { view.connected = true; view.active_id = view.selected; r(view); }, 4000)), // как настоящий: несколько секунд
     disconnect: () => { view.connected = false; return view; },
     vps_traffic: () => ({ by: { owner: [1e9, 9e9, false], aaaaaaaaaa: [2.1e9, 17.3e9, false], bbbbbbbbbb: [1.2e9, 9.6e9, true] } }),
+    app_traffic: () => { const k = (Date.now() / 1000) % 1e4; return [["firefox.exe", 2.1e6, 48e6 + k * 9e4], ["Telegram.exe", 0.9e6, 12e6], ["steam.exe", 0.2e6, 3.4e6], ["svchost.exe", 0.1e6, 0.4e6]].map(([name, up, down]) => ({ name, up, down })); },
     update_check: () => ({ configured: true, current: "0.12.0", version: null, notes: null }),
   };
   window.__TAURI__ = {
