@@ -1382,8 +1382,8 @@ async fn wl_react(app: &AppHandle, info: &RunInfo) {
         if !s.settings.wl_auto {
             return;
         }
-        let Some(t) = wl_node(&s) else { return };
-        if info.nodes.iter().any(|(_, id, _)| *id == t.0) && !info.auto {
+        let t = wl_node(&s);
+        if t.as_ref().is_some_and(|t| info.nodes.iter().any(|(_, id, _)| *id == t.0)) && !info.auto {
             return; // уже на нём
         }
         (t, s.selected.clone())
@@ -1398,6 +1398,22 @@ async fn wl_react(app: &AppHandle, info: &RunInfo) {
         return;
     }
     let Some(prev) = prev else { return };
+    // Сервер для белых списков не выбран — ищем сами среди всех: какой пробивается.
+    let target = match target {
+        Some(t) => t,
+        None => match wl_find(app, &prev).await {
+            Some(t) if st.gen.load(Ordering::SeqCst) == info.gen => t,
+            Some(_) => return,
+            None => {
+                notify(
+                    app,
+                    trs!("Похоже на белые списки"),
+                    trs!("Ни один сервер сейчас не пробивается. Нужен мост: свой VPS в российском облаке — Сервера → Свой сервер → «Мост для белых списков»"),
+                );
+                return;
+            }
+        },
+    };
     {
         // Пока проверяли, человек мог отключиться или выбрать другой сервер.
         let conn = is_connected(&st);
@@ -1456,6 +1472,35 @@ async fn wl_react(app: &AppHandle, info: &RunInfo) {
             return;
         }
     });
+}
+
+/// Белые списки, а свой сервер для них не выбран: проверить все сервера (кроме текущего)
+/// и взять самый быстрый из пробившихся. Нашёлся — запомнить его сервером для белых списков.
+async fn wl_find(app: &AppHandle, cur: &str) -> Option<(String, String)> {
+    let st = app.state::<AppState>();
+    if !runner::xray_path(&st.paths.core).exists() || st.testing.swap(true, Ordering::SeqCst) {
+        return None;
+    }
+    let (nodes, mask, tweaks) = {
+        let s = st.store.lock().unwrap();
+        let nodes: Vec<_> = filter::checkable(&s).into_iter().filter(|n| n.id != cur).take(150).collect();
+        (nodes, rxvpn_core::xray::finalmask(&s.settings), s.settings.node_tweaks.clone())
+    };
+    log(app, tr!("белые списки: ищу сервер, который пробивается (проверяю {})", nodes.len()));
+    let r = batch::test_all(&st.paths.core, &nodes, mask, tweaks, |_| {}).await;
+    st.testing.store(false, Ordering::SeqCst);
+    let (ms, id) = r.ok()?.into_iter().filter_map(|x| x.ms.map(|m| (m, x.id))).min()?;
+    let n = nodes.iter().find(|n| n.id == id)?;
+    {
+        let mut s = st.store.lock().unwrap();
+        if s.settings.wl_server.is_empty() {
+            s.settings.wl_server = n.id.clone();
+            s.settings.wl_server_sub = n.sub_id.clone().unwrap_or_default();
+        }
+    }
+    persist(&st);
+    log(app, tr!("белые списки: пробивается «{}» ({ms} мс) — запомнил его", n.name));
+    Some((n.id.clone(), n.name.clone()))
 }
 
 /// «Проверить сейчас» в окне «Белые списки».
@@ -5381,6 +5426,7 @@ pub fn run() {
             vpsui::vps_friend_set,
             vpsui::vps_friend_limits,
             vpsui::vps_friend_reset,
+            vpsui::vps_set_exit,
             vpsui::vps_qr,
             vpsui::vps_copy,
             vpsui::vps_traffic,

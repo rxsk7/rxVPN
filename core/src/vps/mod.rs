@@ -95,6 +95,10 @@ pub struct Vps {
     pub server_ips: Vec<String>,
     #[serde(default)]
     pub sealed: String,
+    /// Мост для белых списков: ссылка выходного сервера (vless://… и т.п.), через
+    /// который этот сервер отправляет весь трафик. Пусто — обычный сервер.
+    #[serde(default)]
+    pub exit: String,
 }
 
 /// Секреты сервера (в памяти — только на время операции).
@@ -176,6 +180,15 @@ impl Vps {
         v
     }
 
+    /// Исходящие выходного сервера для моста (пусто — выход прямо с этого сервера).
+    pub fn exit_outbounds(&self) -> Result<Vec<serde_json::Value>, String> {
+        if self.exit.is_empty() {
+            return Ok(Vec::new());
+        }
+        let n = crate::parse_link(&self.exit).map_err(|e| tr!("выходной сервер моста: {e}"))?;
+        Ok(crate::xray::node_outbounds(&n))
+    }
+
     /// Лимиты для серверного скрипта (только включённые друзья).
     pub fn limits(&self) -> serde_json::Value {
         let l: Vec<(String, u32, i64)> = self.friends.iter().filter(|f| f.enabled).map(|f| (f.email(), f.limit_gb, f.expires)).collect();
@@ -198,6 +211,7 @@ impl Vps {
             && self.server_ips.len() <= 16
             && self.server_ips.iter().all(|x| x.parse::<std::net::IpAddr>().is_ok())
             && self.friends.iter().all(|f| hex(&f.id, 10) && is_uuid(&f.uuid) && friend_name(&f.name).is_ok() && f.limit_gb <= 100_000 && f.expires >= 0)
+            && (self.exit.is_empty() || (self.exit.len() <= 4096 && crate::parse_link(&self.exit).is_ok()))
     }
 }
 
@@ -330,11 +344,12 @@ pub async fn install(t: &Target, login: Login, o: InstallOpts, fetch: Fetch<'_>,
         password_off: false,
         server_ips,
         sealed: String::new(),
+        exit: String::new(),
     };
 
     let st = stage(&s).await?;
     let q = sh_quote(&st);
-    let cfg = serde_json::to_vec_pretty(&server_config(&v.reality(&secrets), &v.clients(), &v.server_ips)).unwrap();
+    let cfg = serde_json::to_vec_pretty(&server_config(&v.reality(&secrets), &v.clients(), &v.server_ips, &[])).unwrap();
     let pubkey = key.public_key().to_openssh().map_err(|e| e.to_string())? + "\n";
     let jail = fail2ban_jail(sport);
     let files: [(&str, &[u8]); 7] = [
@@ -483,10 +498,11 @@ async fn own(v: &Vps, sec: &Secrets) -> Result<Ssh, String> {
 
 /// Переписать конфиг (друзья поменялись) и перезапустить Xray.
 pub async fn apply(v: &Vps, sec: &Secrets) -> Result<(), String> {
+    let exit = v.exit_outbounds()?;
     let s = own(v, sec).await?;
     let st = stage(&s).await?;
     let q = sh_quote(&st);
-    let cfg = serde_json::to_vec_pretty(&server_config(&v.reality(sec), &v.clients(), &v.server_ips)).unwrap();
+    let cfg = serde_json::to_vec_pretty(&server_config(&v.reality(sec), &v.clients(), &v.server_ips, &exit)).unwrap();
     s.put(&format!("{st}/config.json"), &cfg).await?;
     put_limits(&s, &st, v).await?;
     let r = s

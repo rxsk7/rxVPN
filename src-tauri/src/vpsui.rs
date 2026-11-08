@@ -35,6 +35,9 @@ pub(crate) struct VpsView {
     password_off: bool,
     node_id: String,
     friends: Vec<FriendView>,
+    /// Мост для белых списков: id и имя выходного сервера (пусто — обычный сервер).
+    exit_id: String,
+    exit_name: String,
 }
 
 pub(crate) fn views(s: &Store) -> Vec<VpsView> {
@@ -59,6 +62,12 @@ pub(crate) fn views(s: &Store) -> Vec<VpsView> {
                 .iter()
                 .map(|f| FriendView { id: f.id.clone(), name: f.name.clone(), enabled: f.enabled, limit_gb: f.limit_gb, expires: f.expires })
                 .collect(),
+            exit_id: s.servers.iter().find(|n| !v.exit.is_empty() && n.link == v.exit).map(|n| n.id.clone()).unwrap_or_default(),
+            exit_name: if v.exit.is_empty() {
+                String::new()
+            } else {
+                s.servers.iter().find(|n| n.link == v.exit).map(|n| n.name.clone()).unwrap_or_else(|| trs!("сервер не из списка").to_string())
+            },
         })
         .collect()
 }
@@ -268,6 +277,48 @@ pub(crate) async fn vps_friend_limits(app: AppHandle, st: State<'_, AppState>, i
     let lim = if limit_gb == 0 { trs!("без лимита").to_string() } else { tr!("{limit_gb} ГБ") };
     let till = if days == 0 { trs!("бессрочно").to_string() } else { tr!("на {days} дн.") };
     apply_friends(&app, &st, v, &sec, tr!("друг «{name}»: {lim}, {till}")).await
+}
+
+/// Мост для белых списков: этот VPS (в российском облаке) отправляет весь трафик на
+/// выходной сервер из списка (`exit` — id сервера; пусто — снова обычный сервер).
+/// Если сервер для белых списков ещё не выбран — им становится этот мост.
+#[tauri::command]
+pub(crate) async fn vps_set_exit(app: AppHandle, st: State<'_, AppState>, id: String, exit: String) -> Res<View> {
+    let _b = busy(&st)?;
+    let (mut v, sec) = get(&st, &id)?;
+    let name = if exit.is_empty() {
+        v.exit.clear();
+        None
+    } else {
+        let n = {
+            let s = st.store.lock().unwrap();
+            s.servers.iter().find(|n| n.id == exit).cloned().ok_or(trs!("Сервер не найден"))?
+        };
+        if n.id == v.node_id || n.link == v.owner_link(&v.name) {
+            return Err(trs!("Выходной сервер — другой сервер, не сам мост").into());
+        }
+        rxvpn_core::parse_link(&n.link).map_err(|e| tr!("выходной сервер: {e}"))?;
+        v.exit = n.link.clone();
+        Some(n.name)
+    };
+    let what = match &name {
+        Some(n) => tr!("мост для белых списков, выход через «{n}»"),
+        None => trs!("снова обычный сервер, без моста").to_string(),
+    };
+    let node_id = v.node_id.clone();
+    let r = apply_friends(&app, &st, v, &sec, what).await?;
+    if name.is_some() {
+        let mut s = st.store.lock().unwrap();
+        if s.settings.wl_server.is_empty() && s.servers.iter().any(|n| n.id == node_id) {
+            let sub = s.servers.iter().find(|n| n.id == node_id).and_then(|n| n.sub_id.clone()).unwrap_or_default();
+            s.settings.wl_server = node_id;
+            s.settings.wl_server_sub = sub;
+            drop(s);
+            persist(&st);
+            log(&app, trs!("мост выбран сервером для белых списков"));
+        }
+    }
+    Ok(r)
 }
 
 /// Обнулить накопленный трафик друга (например, новый месяц) — и снять отключение по лимиту.

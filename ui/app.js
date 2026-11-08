@@ -2684,7 +2684,18 @@ function fillVpsMan() {
     [t("Ключ сервера"), v.host_key],
   ];
   if (vmTraffic.owner) rows.push([t("Твой трафик"), `↑ ${fmtBytes(vmTraffic.owner[0])} ↓ ${fmtBytes(vmTraffic.owner[1])}`]);
+  if (v.exit_name) rows.push([t("Мост"), t("выход через «{name}»", { name: v.exit_name })]);
   info.replaceChildren(...rows.flatMap(([k, val]) => [el("span", "", k), el("span", "", val)]));
+  // Выходной сервер моста: любой из списка, кроме самого моста.
+  const ex = $("vm-exit");
+  if (document.activeElement !== ex) {
+    const none = el("option", "", t("Без моста — выход прямо с этого сервера"));
+    none.value = "";
+    const opts = (V.servers || []).filter((n) => n.id !== v.node_id).map((n) => { const o = el("option", "", n.name); o.value = n.id; return o; });
+    if (v.exit_name && !v.exit_id) { const o = el("option", "", v.exit_name); o.value = "?"; opts.unshift(o); }
+    ex.replaceChildren(none, ...opts);
+    ex.value = v.exit_id || (v.exit_name ? "?" : "");
+  }
   const fl = $("vm-friends");
   fl.replaceChildren(...v.friends.map((f) => {
     const r = el("div", "friend-row" + (f.enabled ? "" : " off"));
@@ -2751,6 +2762,12 @@ async function vmDo(cmd, args, okText) {
   }
 }
 $("btn-vm-close").onclick = () => $("dlg-vpsman").close();
+$("btn-vm-exit").onclick = () => {
+  const exit = $("vm-exit").value;
+  if (exit === "?") return; // выходной не из списка — оставить как есть
+  vmDo("vps_set_exit", { id: vmId, exit },
+    exit ? t("Мост готов: трафик идёт через выходной сервер. При белых списках rxvpn переключится на него сам") : t("Мост выключен — выход прямо с этого сервера"));
+};
 $("btn-vm-key").onclick = async () => {
   try {
     const p = await call("vps_export_key", { id: vmId });

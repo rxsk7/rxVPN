@@ -106,7 +106,11 @@ pub struct Reality {
 
 /// Конфиг Xray сервера: VLESS + Reality + Vision, статистика по клиентам на
 /// 127.0.0.1, в локалку сервера и торренты — нельзя, логов посещений нет.
-pub fn server_config(r: &Reality, clients: &[Client], own_ips: &[String]) -> Value {
+///
+/// `exit` — исходящие выходного сервера (главный с тегом "proxy"): тогда этот сервер —
+/// мост для белых списков. Стоит в российском облаке (его адрес в белом списке),
+/// а весь трафик клиентов везёт дальше, на выходной сервер. Пусто — выход прямо отсюда.
+pub fn server_config(r: &Reality, clients: &[Client], own_ips: &[String], exit: &[Value]) -> Value {
     // Свои публичные адреса сервера — тоже закрыты: через lo ufw пускает ко всему,
     // что слушает 0.0.0.0 (базы, панели), а друзья не должны туда попадать.
     let mut block: Vec<String> = PRIVATE_NETS.iter().map(|x| x.to_string()).collect();
@@ -117,7 +121,7 @@ pub fn server_config(r: &Reality, clients: &[Client], own_ips: &[String]) -> Val
         .iter()
         .map(|c| json!({"id": c.uuid, "flow": "xtls-rprx-vision", "email": c.email, "level": 0}))
         .collect();
-    json!({
+    let mut cfg = json!({
         "log": {"loglevel": "warning", "access": "none", "dnsLog": false},
         "api": {"tag": "api", "services": ["StatsService", "HandlerService"]},
         "stats": {},
@@ -148,7 +152,13 @@ pub fn server_config(r: &Reality, clients: &[Client], own_ips: &[String]) -> Val
                 {"protocol": ["bittorrent"], "outboundTag": "block"}
             ]
         }
-    })
+    });
+    if !exit.is_empty() {
+        cfg["outbounds"].as_array_mut().unwrap().extend(exit.iter().cloned());
+        // Всё, что не заблокировано выше, — на выходной сервер.
+        cfg["routing"]["rules"].as_array_mut().unwrap().push(json!({"inboundTag": ["vless"], "outboundTag": "proxy"}));
+    }
+    cfg
 }
 
 /// Ссылка vless:// для клиента (Happ, v2rayNG, сам rxvpn).
@@ -470,7 +480,7 @@ mod tests {
         assert!(parse_usage("{}").is_empty() && parse_usage("мусор").is_empty());
         // Без HandlerService сервер не смог бы отключить друга на ходу
         let r = Reality { v6: false, port: 443, sni: "www.apple.com".into(), private_key: "k".into(), short_id: "ab".into() };
-        assert!(server_config(&r, &[], &[])["api"]["services"].as_array().unwrap().iter().any(|x| x == "HandlerService"));
+        assert!(server_config(&r, &[], &[], &[])["api"]["services"].as_array().unwrap().iter().any(|x| x == "HandlerService"));
         // Скрипт и таймер ссылаются на свои пути
         assert!(limits_service().contains(LIMITS_SCRIPT) && limits_script().contains("rmu") && limits_timer().contains("OnUnitActiveSec=2min"));
     }
@@ -528,12 +538,21 @@ mod tests {
         assert_eq!(ssh_server_port("bad"), None);
         assert_eq!(parse_ips("2: eth0    inet 203.0.113.5/24 brd 203.0.113.255 scope global eth0\n2: eth0    inet6 2001:db8::5/64 scope global\n"), ["203.0.113.5", "2001:db8::5"]);
         let c = server_config(&Reality { v6: false, port: 443, sni: "www.apple.com".into(), private_key: "k".into(), short_id: "ab".into() },
-            &[Client { uuid: "u".into(), email: OWNER_EMAIL.into() }], &["203.0.113.5".into(), "2001:db8::5".into(), "junk".into()]);
+            &[Client { uuid: "u".into(), email: OWNER_EMAIL.into() }], &["203.0.113.5".into(), "2001:db8::5".into(), "junk".into()], &[]);
         let rule = c["routing"]["rules"][1]["ip"].as_array().unwrap();
         assert!(rule.iter().any(|x| x == "203.0.113.5/32") && rule.iter().any(|x| x == "2001:db8::5/128"), "свой IP закрыт");
         assert!(!rule.iter().any(|x| x == "junk/32"));
         assert_eq!(c["inbounds"][0]["listen"], "127.0.0.1", "API — только на самом сервере");
         assert_eq!(c["routing"]["rules"][1]["outboundTag"], "block");
         assert_eq!(c["log"]["access"], "none");
+        assert_eq!(c["routing"]["rules"].as_array().unwrap().len(), 3, "без моста — выход прямо с сервера");
+
+        // Мост: блокировки — как раньше и раньше выхода, остальное — на выходной сервер.
+        let exit = [json!({"tag": "proxy", "protocol": "vless", "settings": {}})];
+        let b = server_config(&Reality { v6: false, port: 443, sni: "www.apple.com".into(), private_key: "k".into(), short_id: "ab".into() }, &[], &[], &exit);
+        let rules = b["routing"]["rules"].as_array().unwrap();
+        assert_eq!(rules.last().unwrap()["outboundTag"], "proxy");
+        assert_eq!(rules[1]["outboundTag"], "block", "локалка сервера закрыта и у моста");
+        assert!(b["outbounds"].as_array().unwrap().iter().any(|o| o["tag"] == "proxy"));
     }
 }
