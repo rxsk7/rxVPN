@@ -2856,12 +2856,12 @@ function showUpd(u) {
 }
 $("btn-upd-check").onclick = async () => {
   $("upd-state").textContent = t("Проверяю…");
-  try { showUpd(await call("update_check")); } catch { $("upd-state").textContent = t("Не проверилось — подробности в логе"); }
+  try { showUpd(await call("update_check")); } catch (e) { $("upd-state").textContent = t("Не проверилось: ") + String(e); }
 };
 $("btn-upd-apply").onclick = async () => {
   if (!confirm(t("Скачать и поставить новую версию? rxvpn перезапустится сам."))) return;
   $("upd-state").textContent = t("Качаю и проверяю…");
-  try { await call("update_apply"); } catch { $("upd-state").textContent = t("Не обновилось — подробности в логе"); }
+  try { await call("update_apply"); } catch (e) { $("upd-state").textContent = t("Не обновилось: ") + String(e); }
 };
 $("btn-settings").addEventListener("click", () => { call("update_check").then(showUpd).catch(() => {}); });
 

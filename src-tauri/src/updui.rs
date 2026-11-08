@@ -28,7 +28,13 @@ fn info() -> UpdateInfo {
 
 async fn check_now(st: &AppState) -> Res<UpdateInfo> {
     let proxy = probe_proxy(st).map(|p| format!("socks5h://127.0.0.1:{p}"));
-    let m = update::check(proxy.as_deref(), env!("CARGO_PKG_VERSION")).await?;
+    let cur = env!("CARGO_PKG_VERSION");
+    // Через VPN (вдруг GitHub режут); не вышло — VPN мог как раз перезапускаться — напрямую.
+    // Подмены можно не бояться: manifest подписан, exe сверяется по хешу.
+    let m = match update::check(proxy.as_deref(), cur).await {
+        Err(e) if proxy.is_some() => update::check(None, cur).await.map_err(|_| e)?,
+        r => r?,
+    };
     *FOUND.lock().unwrap() = m;
     Ok(info())
 }
@@ -49,7 +55,10 @@ pub(crate) async fn update_apply(app: AppHandle, st: State<'_, AppState>) -> Res
     update::verify(&m, update::PUBKEY_HEX.unwrap_or(""), update::REPO.unwrap_or(""), env!("CARGO_PKG_VERSION"))?;
     let proxy = probe_proxy(&st).map(|p| format!("socks5h://127.0.0.1:{p}"));
     log(&app, tr!("обновление: качаю rxvpn {}…", m.version));
-    let exe_bytes = update::download(&m, proxy.as_deref()).await?;
+    let exe_bytes = match update::download(&m, proxy.as_deref()).await {
+        Err(e) if proxy.is_some() => update::download(&m, None).await.map_err(|_| e)?,
+        r => r?,
+    };
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     update::swap(&exe, &exe_bytes)?;
     log(&app, tr!("обновление: rxvpn {} на месте, перезапускаюсь", m.version));
