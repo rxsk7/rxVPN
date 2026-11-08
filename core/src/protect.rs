@@ -45,6 +45,49 @@ pub fn is_protected(app_dir: &Path) -> bool {
     }
 }
 
+/// Можно ли писать в папку: создаём её и пробный файл. WebView2 сам об этом не
+/// скажет — покажет своё окно «не удалось создать каталог данных» и закроется.
+pub fn writable(dir: &Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(".rxvpn-write-test");
+    let ok = std::fs::write(&probe, b"ok").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    let ebw = dir.join("EBWebView");
+    ok && (!ebw.exists() || {
+        let p = ebw.join(".rxvpn-write-test");
+        let ok = std::fs::write(&p, b"ok").is_ok();
+        let _ = std::fs::remove_file(&p);
+        ok
+    })
+}
+
+const FALLBACK_PREFIX: &str = "rxvpn-webview-";
+
+/// Запасной профиль окна для копии с правами, когда в её папку в Program Files писать
+/// нельзя (так бывает: антивирус не пускает туда msedgewebview2). Папка — в
+/// C:\Windows\Temp: обычные программы там могут создать своё, но не видят список
+/// и не читают чужое, а имя у папки случайное — заранее её не подложить и не найти.
+/// Профиль одноразовый: старые такие папки удаляем при следующем запуске.
+pub fn fallback_webview_dir() -> Option<PathBuf> {
+    let tmp = crate::winsys::windows_dir()?.join("Temp");
+    if let Ok(rd) = std::fs::read_dir(&tmp) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().starts_with(FALLBACK_PREFIX) {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    let mut b = [0u8; 16];
+    getrandom::getrandom(&mut b).ok()?;
+    let name: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let d = tmp.join(format!("{FALLBACK_PREFIX}{name}"));
+    // create_dir, а не create_dir_all: если такая уже есть — это не наша.
+    std::fs::create_dir(&d).ok()?;
+    writable(&d).then_some(d)
+}
+
 fn sha_file(p: &Path) -> Option<String> {
     let m = std::fs::symlink_metadata(p).ok()?;
     if !m.is_file() || m.len() > 200 << 20 {

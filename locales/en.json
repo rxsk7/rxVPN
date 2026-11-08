@@ -708,6 +708,8 @@
  "в .dgst нет SHA2-256": "no SHA2-256 in .dgst",
  "в JSON-подписке нет серверов": "the JSON subscription has no servers",
  "в tuic:// нужен UUID (TUIC v5)": "tuic:// needs a UUID (TUIC v5)",
+ "в {} писать нельзя (антивирус?) — профиль окна во временной папке": "{} is not writable (antivirus?) — window profile goes to a temporary folder",
+ "в {} писать нельзя — профиль окна в %LOCALAPPDATA%": "{} is not writable — window profile goes to %LOCALAPPDATA%",
  "в архиве нет sing-box.exe": "sing-box.exe is missing from the archive",
  "в архиве нет xray": "no xray in the archive",
  "в архиве нет {f}": "no {f} in the archive",

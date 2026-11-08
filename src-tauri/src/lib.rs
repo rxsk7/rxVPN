@@ -2882,7 +2882,6 @@ fn toggle_mini(app: &AppHandle, at: tauri::PhysicalPosition<f64>) {
         let _ = w.set_focus();
         return;
     }
-    let st = app.state::<AppState>();
     let mut b = tauri::WebviewWindowBuilder::new(app, "mini", tauri::WebviewUrl::App("mini.html".into()))
         .title("rxvpn")
         .inner_size(W, H)
@@ -2893,8 +2892,8 @@ fn toggle_mini(app: &AppHandle, at: tauri::PhysicalPosition<f64>) {
         .skip_taskbar(true)
         .visible(false);
     // Та же папка профиля окна, что у главного: у WebView2 одна среда на процесс.
-    if st.paths.portable {
-        b = b.data_directory(webview_dir(&st.paths, winsys::is_admin()));
+    if let Some(d) = WEBVIEW_DIR.get() {
+        b = b.data_directory(d.clone());
     }
     match b.build() {
         Ok(w) => {
@@ -4993,6 +4992,9 @@ fn spawn_sub_updater(app: AppHandle) {
     });
 }
 
+/// Папка профиля, которую получило главное окно (мини-окно берёт ту же).
+static WEBVIEW_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
 /// Профиль окна (WebView2): кэш, Code Cache, Local Storage, Preferences. Окно с правами
 /// администратора не должно читать его из папки data — туда пишет любая программа без
 /// прав, а подложенный профиль (кэш байткода V8, настройки) работал бы в окне, у которого
@@ -5297,7 +5299,20 @@ pub fn run() {
                 (st.paths.portable, webview_dir(&st.paths, winsys::is_admin()), s.settings.autostart, s.settings.run_as_admin, s.settings.auto_connect)
             };
             if portable {
-                builder = builder.data_directory(webview_dir);
+                let dir = if rxvpn_core::protect::writable(&webview_dir) {
+                    Some(webview_dir)
+                } else if winsys::is_admin() {
+                    let fb = rxvpn_core::protect::fallback_webview_dir();
+                    log(app.handle(), tr!("в {} писать нельзя (антивирус?) — профиль окна во временной папке", webview_dir.display()));
+                    fb
+                } else {
+                    log(app.handle(), tr!("в {} писать нельзя — профиль окна в %LOCALAPPDATA%", webview_dir.display()));
+                    None
+                };
+                if let Some(d) = dir {
+                    let _ = WEBVIEW_DIR.set(d.clone());
+                    builder = builder.data_directory(d);
+                }
             }
             builder.build()?;
 

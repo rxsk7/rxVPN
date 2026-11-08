@@ -253,11 +253,22 @@ pub fn windows_exe(name: &str) -> Option<std::path::PathBuf> {
 /// Папка Program Files (64-бит) — от самой Windows (KnownFolder), не из переменных окружения.
 #[cfg(windows)]
 pub fn program_files() -> Option<std::path::PathBuf> {
+    known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_ProgramFiles)
+}
+
+/// Папка Windows (C:\Windows) — тоже от самой Windows, не из %SystemRoot%.
+#[cfg(windows)]
+pub fn windows_dir() -> Option<std::path::PathBuf> {
+    known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Windows)
+}
+
+#[cfg(windows)]
+fn known_folder(id: &windows_sys::core::GUID) -> Option<std::path::PathBuf> {
     use windows_sys::Win32::System::Com::CoTaskMemFree;
-    use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramFiles, SHGetKnownFolderPath};
+    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
     unsafe {
         let mut p: windows_sys::core::PWSTR = std::ptr::null_mut();
-        if SHGetKnownFolderPath(&FOLDERID_ProgramFiles, 0, std::ptr::null_mut(), &mut p) != 0 || p.is_null() {
+        if SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut p) != 0 || p.is_null() {
             if !p.is_null() {
                 CoTaskMemFree(p as _);
             }
@@ -275,6 +286,11 @@ pub fn program_files() -> Option<std::path::PathBuf> {
 
 #[cfg(not(windows))]
 pub fn program_files() -> Option<std::path::PathBuf> {
+    None
+}
+
+#[cfg(not(windows))]
+pub fn windows_dir() -> Option<std::path::PathBuf> {
     None
 }
 
