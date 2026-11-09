@@ -210,9 +210,45 @@ pub fn valid_data_dir(p: &Path) -> bool {
     p.is_absolute() && p.is_dir() && !s.starts_with(r"\\") && !s.contains('"') && !crate::winsys::is_remote_drive(&s)
 }
 
+/// Файл в папке копии с путём к папке data портативной.
+const DATA_PATH_FILE: &str = "data-path.txt";
+
+/// Папка данных для копии: пришла аргументом — запомнить (если есть права писать в
+/// копию); не пришла — взять запомненную. Запомненная тоже проверяется.
+pub fn remember_data(app_dir: &Path, arg: Option<PathBuf>, admin: bool) -> Option<PathBuf> {
+    let file = app_dir.join(DATA_PATH_FILE);
+    match arg {
+        Some(p) => {
+            if admin && std::fs::read_to_string(&file).ok().as_deref() != Some(&*p.to_string_lossy()) {
+                let _ = std::fs::write(&file, p.to_string_lossy().as_bytes());
+            }
+            Some(p)
+        }
+        None => std::fs::read_to_string(&file).ok().map(|s| PathBuf::from(s.trim())).filter(|p| valid_data_dir(p)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_path_is_remembered() {
+        let root = tmp("rd");
+        let (pf, data) = (root.join("pf"), root.join("portable/data"));
+        std::fs::create_dir_all(&pf).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        assert_eq!(remember_data(&pf, None, true), None);
+        // без прав не пишем
+        assert_eq!(remember_data(&pf, Some(data.clone()), false), Some(data.clone()));
+        assert_eq!(remember_data(&pf, None, true), None);
+        assert_eq!(remember_data(&pf, Some(data.clone()), true), Some(data.clone()));
+        assert_eq!(remember_data(&pf, None, false), Some(data.clone()));
+        // папки больше нет — не берём
+        std::fs::remove_dir_all(&data).unwrap();
+        assert_eq!(remember_data(&pf, None, true), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn tmp(n: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("rxvpn-protect-{n}-{}", std::process::id()));

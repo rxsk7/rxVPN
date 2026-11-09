@@ -5170,6 +5170,10 @@ pub fn run() {
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from)
         .filter(|p| rxvpn_core::protect::valid_data_dir(p));
+    // Копию запустили без --data (старая кнопка «Обновить», ярлык на Program Files) —
+    // берём папку с прошлого запуска; она записана в Program Files, куда пишет только
+    // администратор. С --data — запоминаем.
+    let data_arg = if protected { rxvpn_core::protect::remember_data(&app_dir, data_arg, winsys::is_admin()) } else { data_arg };
     // Портативная: если рядом с rxvpn.exe есть папка data — всё живёт там.
     let portable_base = if protected { data_arg.clone() } else { Some(app_dir.join("data")).filter(|d| d.is_dir()) };
     let portable = portable_base.is_some();

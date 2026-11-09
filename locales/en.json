@@ -953,6 +953,8 @@
  "обновление: rxvpn {} на месте, перезапускаюсь": "update: rxvpn {} is in place, restarting",
  "обновление: есть rxvpn {v}": "update: rxvpn {v} is available",
  "обновление: качаю rxvpn {}…": "update: downloading rxvpn {}…",
+ "обновление: портативный {} не обновился ({e}) — распакуй новую версию туда сам": "update: portable {} was not updated ({e}) — unpack the new version there yourself",
+ "обновление: портативный {} тоже обновлён": "update: portable {} updated too",
  "обновление: проверить не вышло — {e}": "update: the check failed — {e}",
  "оборвалась на {} КБ": "broke off at {} KB",
  "оборвалось на {} КБ": "broke off at {} KB",

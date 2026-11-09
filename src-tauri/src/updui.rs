@@ -61,9 +61,22 @@ pub(crate) async fn update_apply(app: AppHandle, st: State<'_, AppState>) -> Res
     };
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     update::swap(&exe, &exe_bytes)?;
+    // Это копия в Program Files: портативный rxvpn.exe (рядом с папкой data) — тоже
+    // новый, иначе запуск с рабочего стола показал бы старую версию и спросил про
+    // «другой rxvpn.exe».
+    if let Some(p) = portable_exe(&st.paths) {
+        match update::swap(&p, &exe_bytes) {
+            Ok(()) => log(&app, tr!("обновление: портативный {} тоже обновлён", p.display())),
+            Err(e) => log(&app, tr!("обновление: портативный {} не обновился ({e}) — распакуй новую версию туда сам", p.display())),
+        }
+    }
     log(&app, tr!("обновление: rxvpn {} на месте, перезапускаюсь", m.version));
     let was = running(&st);
     let mut cmd = std::process::Command::new(&exe);
+    if st.paths.protected {
+        // Без этого копия не знает, где сервера и настройки, и открылась бы пустой.
+        cmd.arg("--data").arg(&st.paths.data);
+    }
     cmd.arg("--relaunched");
     if was {
         cmd.arg("--connect");
@@ -75,6 +88,14 @@ pub(crate) async fn update_apply(app: AppHandle, st: State<'_, AppState>) -> Res
     stop_zapret(&st);
     app.exit(0);
     Ok(())
+}
+
+/// rxvpn.exe портативной, от которой запущена копия: `<папка>\data` → `<папка>\rxvpn.exe`.
+fn portable_exe(paths: &Paths) -> Option<PathBuf> {
+    if !paths.protected || !paths.data.file_name().is_some_and(|n| n.eq_ignore_ascii_case("data")) {
+        return None;
+    }
+    paths.data.parent().map(|d| d.join(rxvpn_core::protect::EXE)).filter(|p| p.is_file())
 }
 
 /// Раз в день: есть новее — уведомление (ставится только по кнопке).
