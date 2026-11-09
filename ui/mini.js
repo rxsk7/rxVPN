@@ -53,6 +53,7 @@ function render() {
     : V.zapret_active ? t("Zapret работает")
     : V.connected ? t("Подключено")
     : V.kill_on ? t("VPN упал")
+    : V.paused ? t("Пауза")
     : t("Не подключено");
 
   const sel = V.servers.find((s) => s.id === V.selected);
@@ -64,10 +65,21 @@ function render() {
   if (busy) sub = t("Подождите немного");
   else if (V.connected || V.zapret_active) sub = (ping ? t("{ms} мс", { ms: ping }) + " · " : "") + clock(Date.now() - connSince);
   else if (V.kill_on) sub = t("Kill switch: интернет закрыт, пока VPN не вернётся");
+  else if (V.paused) sub = V.pause_until ? t("VPN включится сам в {time}", { time: hhmm(V.pause_until) }) : t("VPN выключен, пока не нажмёшь на гору");
   else sub = V.servers.length || V.settings.zapret ? t("Нажми на гору, чтобы подключиться") : t("Добавь сервер в большом окне");
   $("m-sub").textContent = sub;
   $("m-speed").classList.toggle("idle", !V.connected);
+  $("m-pause").classList.toggle("hidden", !on);
 }
+function hhmm(unix) {
+  const d = new Date(unix * 1000), p = (x) => String(x).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+$("m-pause").onclick = async () => {
+  if (busy) return;
+  try { V = await invoke("pause_vpn", { minutes: 15 }); } catch { await refresh(); }
+  render();
+};
 
 async function refresh() {
   try { V = await invoke("get_view"); } catch { return; }

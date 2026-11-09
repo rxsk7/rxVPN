@@ -24,3 +24,5 @@ body.mini {
 .mini .m-server { padding: 10px 12px; background: var(--card-2); box-shadow: none; }
 .m-speed { display: flex; justify-content: space-between; font: 600 13px var(--font-display); font-variant-numeric: tabular-nums; padding: 0 2px; }
 .m-speed.idle { opacity: .35; }
+
+#m-pause { margin: 4px auto 0; display: block; }

@@ -12,8 +12,8 @@ pub struct Inputs {
     pub lists_stale: bool,
     /// Фоновая проверка zapret: стратегия перестала пробивать и замена не нашлась.
     pub zapret_broken: bool,
-    /// (подписка, предупреждение от SubUsage::warning).
-    pub subs: Vec<(String, String)>,
+    /// (подписка, предупреждение от SubUsage::warning, уже кончилась).
+    pub subs: Vec<(String, String, bool)>,
     /// Выбранный сервер «сдаёт» (stats.rs): имя.
     pub server_weak: Option<String>,
     /// Последняя проверка DNS нашла утечку.
@@ -57,8 +57,8 @@ pub fn issues(i: &Inputs) -> Vec<Issue> {
     if let Some(n) = &i.server_weak {
         add("warn", tr!("Сервер «{n}» в последние сутки сдаёт"), "servers", trs!("Сменить"));
     }
-    for (name, w) in &i.subs {
-        add("warn", format!("«{name}»: {w}"), "subs", trs!("Открыть"));
+    for (name, w, ended) in &i.subs {
+        add(if *ended { "bad" } else { "warn" }, format!("«{name}»: {w}"), "subs", trs!("Открыть"));
     }
     if i.dns_leak {
         add("warn", trs!("Последняя проверка нашла утечку DNS").into(), "dns", trs!("Проверить"));
@@ -82,7 +82,7 @@ mod tests {
             core_age_days: Some(90),
             lists_stale: true,
             closed_rules: 2,
-            subs: vec![("Провайдер".into(), "подписка кончается через 2 дня".into())],
+            subs: vec![("Провайдер".into(), "подписка кончается через 2 дня".into(), false)],
             server_weak: Some("NL".into()),
             ..Default::default()
         });
@@ -93,5 +93,8 @@ mod tests {
         assert_eq!((m.len(), m[0].level), (1, "bad"));
         let d = issues(&Inputs { dns_stuck: true, lists_stale: true, ..Default::default() });
         assert_eq!((d[0].action, d[0].button), ("dnsfix", "Вернуть DNS"));
+        // Кончившаяся подписка — «не работает», а не «стоит заняться».
+        let e = issues(&Inputs { subs: vec![("П".into(), "подписка закончилась".into(), true)], lists_stale: true, ..Default::default() });
+        assert_eq!((e[0].action, e[0].level), ("subs", "bad"));
     }
 }

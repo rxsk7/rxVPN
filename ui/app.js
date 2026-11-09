@@ -151,6 +151,7 @@ showPage(load("page") || "home");
 
 function render() {
   if (!V) return;
+  if (load("simple") === null) { store("simple", V.servers.length || V.subscriptions.length ? "0" : "1"); applySimple(); }
   if (V.lang && i18n.set(V.lang)) langChanged();
   renderVps();
   renderHealth();
@@ -314,6 +315,7 @@ function renderHero() {
     : V.zapret_testing ? t("Подбираю стратегию…")
     : V.zapret_active ? t("Zapret работает")
     : V.connected ? t("Подключено")
+    : V.paused ? t("Пауза")
     : t("Не подключено");
   let sub;
   if (busy || V.zapret_testing) sub = t("Подождите немного");
@@ -328,9 +330,72 @@ function renderHero() {
     sub = t("Kill switch: интернет закрыт, пока VPN не вернётся");
     label.textContent = t("VPN упал");
     label.classList.add("busy");
+  } else if (V.paused) {
+    sub = V.pause_until ? t("VPN включится сам в {time} — или нажми на гору", { time: hhmm(V.pause_until) })
+      : t("VPN выключен, пока не нажмёшь на гору");
   } else sub = V.servers.length || V.settings.zapret ? t("Нажми кнопку, чтобы подключиться") : "";
   $("hero-sub").textContent = sub;
   $("btn-kill-release").classList.toggle("hidden", !(V.kill_on && !V.connected && !busy));
+  $("pause-row").classList.toggle("hidden", !(on && !V.zapret_testing));
+}
+// Часы:минуты по местному времени из unix-времени.
+function hhmm(unix) {
+  const d = new Date(unix * 1000), p = (x) => String(x).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+// ---------- «Что-то не работает?» ----------
+$("btn-help").onclick = () => $("dlg-help").showModal();
+$("btn-help-close").onclick = () => $("dlg-help").close();
+const HELP = {
+  // Сервер не тот: проверить все и встать на самый быстрый.
+  slow: () => { showPage("servers"); $("btn-fastest").click(); },
+  // YouTube/Discord: уже есть zapret — подобрать стратегию; нет — показать, где включить.
+  video: () => {
+    if (V.settings.zapret || V.settings.zapret_hybrid) { openZapret().then(() => $("btn-z-test").click()); return; }
+    showPage("bypass");
+    document.querySelector('.scen[data-scen="zapret-field"]').click();
+  },
+  // Telegram: включён — подключить в Telegram; нет — показать переключатель.
+  tg: () => {
+    if (V.tg?.running) return tgOpen();
+    showPage("bypass");
+    document.querySelector('.scen[data-scen="tg-field"]').click();
+  },
+  site: () => openDiag(""),
+  bank: async () => {
+    if (!isOn()) return toast(t("VPN и так выключен — банк должен открыться. Не открывается — проверь сайт: «Не открывается сайт»"));
+    const v = await call("pause_vpn", { minutes: 15 }).catch(() => null);
+    if (!v) return;
+    V = v;
+    render();
+    toast(t("Пауза: VPN включится сам в {time}", { time: hhmm(V.pause_until) }));
+  },
+  report: () => openReport(null),
+};
+for (const b of document.querySelectorAll("#dlg-help [data-help]")) {
+  b.onclick = () => { $("dlg-help").close(); HELP[b.dataset.help](); };
+}
+
+// ---------- простой вид ----------
+// Новым (на первом запуске серверов ещё нет) — простой; у тех, кто уже пользовался, — как было.
+function applySimple() { document.body.classList.toggle("simple", load("simple") === "1"); $("chk-simple").checked = load("simple") === "1"; }
+$("chk-simple").onchange = (e) => {
+  store("simple", e.target.checked ? "1" : "0");
+  applySimple();
+  if (e.target.checked && (page === "routes" || page === "bypass")) showPage("home");
+};
+applySimple();
+
+for (const b of document.querySelectorAll("#pause-row [data-pause]")) {
+  b.onclick = async () => {
+    if (busy) return;
+    const minutes = Number(b.dataset.pause);
+    const v = await call("pause_vpn", { minutes }).catch(() => null);
+    if (!v) return;
+    V = v;
+    render();
+    toast(minutes ? t("Пауза: VPN включится сам в {time}", { time: hhmm(V.pause_until) }) : t("VPN на паузе — включится, когда нажмёшь на гору"));
+  };
 }
 setInterval(() => { if (V && connSince) renderHero(); }, 1000);
 $("btn-kill-release").onclick = async () => {
@@ -366,7 +431,7 @@ $("wel-vps").onclick = () => $("btn-vps-new").click();
 $("wel-zapret").onclick = () => document.querySelector('#seg-mode button[data-mode="zapret"]').click();
 
 // ---------- «Обход»: что не работает ----------
-for (const b of document.querySelectorAll(".scen")) {
+for (const b of document.querySelectorAll(".scen[data-scen]")) {
   b.onclick = () => {
     const go = b.dataset.scen;
     if (go === "diag") return $("btn-diag").click();

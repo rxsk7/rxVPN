@@ -3,6 +3,7 @@
 
 mod dohui;
 mod notify;
+mod pauseui;
 mod reportui;
 mod updui;
 mod vpsui;
@@ -93,6 +94,9 @@ impl RunInfo {
 
 struct AppState {
     paths: Paths,
+    /// «Пауза» (pauseui.rs): VPN выключен на время, потом включится сам.
+    pause: Mutex<Option<pauseui::Pause>>,
+    pause_gen: AtomicU64,
     store: Mutex<Store>,
     proc: Mutex<Option<XrayProcess>>,
     /// Счётчик запусков. Нужен, чтобы отличить "мы сами остановили ядро"
@@ -312,6 +316,9 @@ struct View {
     is_windows: bool,
     /// Kill switch включён: без VPN интернет закрыт (кроме локальной сети).
     kill_on: bool,
+    /// Пауза: идёт ли и до какого unix-времени (None внутри — до включения вручную).
+    paused: bool,
+    pause_until: Option<i64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -505,7 +512,7 @@ fn view(st: &AppState) -> View {
         core_missing: !core_installed,
         lists_stale,
         zapret_broken: st.zapret_broken.load(Ordering::SeqCst),
-        subs: s.subscriptions.iter().filter_map(|x| Some((x.name.clone(), x.usage?.warning(now)?))).collect(),
+        subs: s.subscriptions.iter().filter_map(|x| { let u = x.usage?; Some((x.name.clone(), u.warning(now)?, u.ended(now))) }).collect(),
         server_weak: if s.is_auto() { None } else { s.selected_node().filter(|n| scores.get(&n.id).is_some_and(|sc| sc.degraded)).map(|n| n.name.clone()) },
         dns_leak: st.dns_leak.load(Ordering::SeqCst),
         closed_rules: site_routes(&s.settings, &s.servers).iter().filter(|r| r.node.is_none()).count(),
@@ -556,6 +563,8 @@ fn view(st: &AppState) -> View {
         zapret_testing: st.ztesting.load(Ordering::SeqCst),
         is_windows: cfg!(windows),
         kill_on: st.kill.lock().unwrap().is_some(),
+        paused: pauseui::current(st).is_some(),
+        pause_until: pauseui::current(st).and_then(|p| p.until),
         tg,
         doh,
         vps: vpsui::views(&s),
@@ -1947,6 +1956,8 @@ fn start_hybrid_with(app: &AppHandle, st: &AppState, h: zapret::Hybrid) -> Res<(
 /// Подключиться в выбранном режиме: Xray (прокси/TUN) или zapret.
 async fn connect_any(app: &AppHandle, allow_tun: bool) -> Res<()> {
     let st = app.state::<AppState>();
+    // Подключаемся — значит, пауза больше не нужна (и её таймер ничего не включит).
+    pauseui::clear(&st);
     // Подбор сам включает и выключает winws и VPN — не мешаем ему.
     if st.ztesting.load(Ordering::SeqCst) {
         return Err(trs!("Идёт подбор стратегии zapret — дождись конца или нажми «Стоп»").into());
@@ -2996,7 +3007,9 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     };
     let auto = st.run.lock().unwrap().as_ref().is_some_and(|r| r.auto);
     let zname = zapret_running_name(&st);
+    let pause = pauseui::current(&st);
     let status = match (connected, active_node(&st)) {
+        _ if pause.is_some() && !connected && zname.is_none() => pauseui::tray_status(pause.as_ref().unwrap()),
         _ if zname.is_some() && !connected => tr!("● Zapret без VPN: {}", menu_text(zname.as_deref().unwrap_or(""))),
         (true, Some((_, n))) if auto => tr!("● Подключено: Авто → {}", menu_text(&n)),
         (true, Some((_, n))) => tr!("● Подключено: {}", menu_text(&n)),
@@ -3007,7 +3020,13 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     // Идёт подбор zapret — «Отключить» останавливает и его.
     let on = connected || zname.is_some() || st.ztesting.load(Ordering::SeqCst);
     let can = !servers.is_empty() || settings.zapret;
-    let toggle = MenuItem::with_id(app, "toggle", if on { trs!("Отключить") } else { trs!("Подключить") }, can, None::<&str>)?;
+    let toggle_text = if on { trs!("Отключить") } else if pause.is_some() { trs!("Включить сейчас") } else { trs!("Подключить") };
+    let toggle = MenuItem::with_id(app, "toggle", toggle_text, can, None::<&str>)?;
+    // Пауза — только пока что-то подключено.
+    let pause_menu = Submenu::with_id(app, "pause", trs!("Пауза"), on && !st.ztesting.load(Ordering::SeqCst))?;
+    for m in pauseui::CHOICES {
+        pause_menu.append(&MenuItem::with_id(app, format!("pause:{m}"), pauseui::choice_label(m), true, None::<&str>)?)?;
+    }
 
     // --- сервер ---
     let srv = Submenu::with_id(app, "srv", trs!("Сервер"), !servers.is_empty())?;
@@ -3077,7 +3096,20 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let show = MenuItem::with_id(app, "show", trs!("Открыть rxvpn"), true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", trs!("Выход"), true, None::<&str>)?;
     let (sep1, sep2) = (PredefinedMenuItem::separator(app)?, PredefinedMenuItem::separator(app)?);
-    Menu::with_items(app, &[&status, &toggle, &sep1, &srv, &route, &mode, &ads, &sep2, &show, &quit])
+    Menu::with_items(app, &[&status, &toggle, &pause_menu, &sep1, &srv, &route, &mode, &ads, &sep2, &show, &quit])
+}
+
+/// Отключить всё: VPN, kill switch, zapret, подбор и DNS (DNS — в фоне: netsh — секунды).
+fn stop_everything(app: &AppHandle, st: &AppState, why: &'static str) {
+    let a = app.clone();
+    tauri::async_runtime::spawn(async move { dohui::doh_stop_now(&a, why).await });
+    stop_core(st);
+    kill_off(app, st, why);
+    stop_zapret(st);
+    // После остановки: подбор, увидевший «Стоп», уже видит и смену zgen
+    // (значит, «Отключить», а не «Стоп» — ничего не включает обратно).
+    st.zcancel.store(true, Ordering::SeqCst);
+    reset_auto(st);
 }
 
 fn on_tray_menu(app: &AppHandle, id: &str) {
@@ -3085,16 +3117,8 @@ fn on_tray_menu(app: &AppHandle, id: &str) {
         "toggle" => {
             let st = app.state::<AppState>();
             if running(&st) || st.ztesting.load(Ordering::SeqCst) {
-                // DNS — в фоне (netsh — секунды; DoH от zapret не зависит, пусть доработает).
-                let a = app.clone();
-                tauri::async_runtime::spawn(async move { dohui::doh_stop_now(&a, trs!("отключено")).await });
-                stop_core(&st);
-                kill_off(app, &st, trs!("отключено"));
-                stop_zapret(&st);
-                // После остановки: подбор, увидевший «Стоп», уже видит и смену zgen
-                // (значит, «Отключить», а не «Стоп» — ничего не включает обратно).
-                st.zcancel.store(true, Ordering::SeqCst);
-                reset_auto(&st);
+                stop_everything(app, &st, trs!("отключено"));
+                pauseui::clear(&st);
                 log(app, trs!("отключено (из трея)"));
                 changed(app);
             } else {
@@ -3122,6 +3146,12 @@ fn on_tray_menu(app: &AppHandle, id: &str) {
                 _ => RouteMode::BypassRu,
             };
             tray_apply(app, trs!("маршрутизация"), false, move |s| std::mem::replace(&mut s.settings.route, mode) != mode)
+        }
+        _ if id.starts_with("pause:") => {
+            let m = id["pause:".len()..].parse::<u32>().unwrap_or(u32::MAX);
+            if let Err(e) = pauseui::start(app, m) {
+                log(app, e);
+            }
         }
         _ => {
             if let Some(sid) = id.strip_prefix("srv:").map(str::to_string) {
@@ -3358,6 +3388,7 @@ async fn disconnect(app: AppHandle, st: State<'_, AppState>) -> Res<View> {
     // И подбор, если идёт. После остановки: см. on_tray_menu.
     st.zcancel.store(true, Ordering::SeqCst);
     reset_auto(&st);
+    pauseui::clear(&st);
     log(&app, trs!("отключено"));
     refresh_tray(&app);
     Ok(view(&st))
@@ -5254,6 +5285,8 @@ pub fn run() {
         last_report: Mutex::new(None),
         zapret: Mutex::new(None),
         zgen: AtomicU64::new(0),
+        pause: Mutex::new(None),
+        pause_gen: AtomicU64::new(0),
         hybrid: Mutex::new(None),
         tg: tokio::sync::Mutex::new(None),
         tg_info: Mutex::new(None),
@@ -5492,6 +5525,7 @@ pub fn run() {
             speed_all_cancel,
             reportui::problem_report_copy,
             reportui::problem_report_github,
+            pauseui::pause_vpn,
             reportui::problem_report_save,
             wl_check,
             services_list,

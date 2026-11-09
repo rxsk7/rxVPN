@@ -69,6 +69,11 @@ impl SubUsage {
         self.upload.saturating_add(self.download)
     }
 
+    /// Срок вышел или трафик кончился — VPN по этой подписке уже не работает.
+    pub fn ended(&self, now: i64) -> bool {
+        (self.expire > 0 && self.expire <= now) || (self.total > 0 && self.used() >= self.total)
+    }
+
     /// О чём предупредить: срок кончается через ≤3 дня или трафика осталось ≤10%.
     pub fn warning(&self, now: i64) -> Option<String> {
         if self.expire > 0 {
@@ -784,6 +789,9 @@ mod tests {
         assert_eq!(t.warning(0).as_deref(), Some("трафика подписки осталось меньше 10%"));
         assert!(SubUsage { download: 50, total: 100, ..Default::default() }.warning(0).is_none());
         assert!(SubUsage { download: 50, total: 0, expire: 0, upload: 0 }.warning(0).is_none(), "безлимит");
+        assert!(u.ended(1767225601) && !u.ended(1767225600 - 86000), "срок вышел — кончилась");
+        assert!(SubUsage { download: 100, total: 100, ..Default::default() }.ended(0), "трафик кончился");
+        assert!(!t.ended(0) && !SubUsage::default().ended(i64::MAX / 2), "95% и безлимит — ещё работает");
         // Кривое — не падаем.
         assert_eq!(SubUsage::parse(" Upload = 5 ;garbage; total=1e3; expire=-4").unwrap(), SubUsage { upload: 5, download: 0, total: 1000, expire: 0 });
         for bad in ["", "nothing", "upload=abc", &"x".repeat(2000)] {

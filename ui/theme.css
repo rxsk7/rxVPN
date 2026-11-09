@@ -48,7 +48,7 @@ body { flex-direction: row; }
 .home { max-width: 820px; padding: 10px 0 4px; gap: 20px; display: flex; flex-direction: column; align-items: stretch; }
 .home-main {
   display: grid; grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas: "peak label" "peak sub" "peak kill" "peak srv" "peak health";
+  grid-template-areas: "peak label" "peak sub" "peak kill" "peak pause" "peak srv" "peak health" "peak help";
   column-gap: 28px; row-gap: 6px; align-items: center; align-content: center;
 }
 .home-main .power-wrap { grid-area: peak; }
@@ -57,13 +57,16 @@ body { flex-direction: row; }
 .home-main #btn-kill-release { grid-area: kill; justify-self: start; }
 .home-main #btn-current { grid-area: srv; margin-top: 8px; }
 .home-main #health { grid-area: health; }
+.home-main #pause-row { grid-area: pause; justify-content: flex-start; margin: 0; }
+.home-main #btn-help { grid-area: help; margin-top: 0; }
 .home-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
 .home-side .speed, .home-side .tg-home, .home-side .home-tools { grid-column: 1 / -1; }
 @media (max-width: 820px) {
-  .home-main { grid-template-columns: minmax(0, 1fr); grid-template-areas: "peak" "label" "sub" "kill" "srv" "health"; justify-items: center; }
+  .home-main { grid-template-columns: minmax(0, 1fr); grid-template-areas: "peak" "label" "sub" "kill" "pause" "srv" "health" "help"; justify-items: center; }
+  .home-main #pause-row { justify-content: center; }
   .home-main .power-label, .home-main .hero-sub { text-align: center; align-self: auto; }
   .home-main #btn-kill-release { justify-self: center; }
-  .home-main #btn-current, .home-main #health { justify-self: stretch; }
+  .home-main #btn-current, .home-main #health, .home-main #btn-help { justify-self: stretch; }
   .home-side { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -173,3 +176,17 @@ details.home-log:not([open]) summary button { display: none; }
 .group.flash { animation: flash 1.4s ease-out; border-radius: var(--radius); }
 @keyframes flash { 0%, 40% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); } 100% { box-shadow: 0 0 0 3px transparent; } }
 @media (max-width: 560px) { .scen-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Кнопка «Что-то не работает?» на главной */
+.help-row { margin-top: 10px; }
+.help-ico { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; flex: none;
+  font-weight: 700; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.help-grid { margin: 4px 0 12px; }
+
+/* Простой вид: прячем то, что новичку не нужно (всё работает, просто не на виду) */
+body.simple #tabs button[data-page="routes"],
+body.simple #tabs button[data-page="bypass"],
+body.simple #route-home,
+body.simple #home-tools,
+body.simple #log-box { display: none; }
+body.simple .home-side .mode-block { grid-column: 1 / -1; }

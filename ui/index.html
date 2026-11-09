@@ -94,6 +94,13 @@
         <div class="power-label" id="power-label">Не подключено</div>
         <div class="hero-sub" id="hero-sub">Нажми кнопку, чтобы подключиться</div>
         <button class="ghost small hidden" id="btn-kill-release" title="Снять блокировку kill switch и пустить интернет без VPN">Открыть интернет без VPN</button>
+        <!-- Пауза: банк или Госуслуги не пускают с VPN — выключить на время, потом rxvpn включит сам -->
+        <div class="chips pause-row hidden" id="pause-row" title="Выключить VPN на время — например, для банка или Госуслуг. Потом rxvpn включится сам">
+          <span class="pause-title">⏸ Пауза</span>
+          <button type="button" data-pause="15">15 мин</button>
+          <button type="button" data-pause="60">1 час</button>
+          <button type="button" data-pause="0">Пока не включу</button>
+        </div>
 
         <button class="card-row" id="btn-current">
           <span class="cr-text">
@@ -105,6 +112,16 @@
 
         <!-- Проверки — на виду, каждая открывается окном поверх -->
         <div class="health ok" id="health"><span id="health-text">Всё в порядке</span><button type="button" class="ghost small hidden" id="health-btn"></button></div>
+
+        <!-- Одна кнопка на все случаи: выбери, что не так, — rxvpn сам откроет нужное и начнёт чинить -->
+        <button class="card-row help-row" id="btn-help">
+          <span class="help-ico" aria-hidden="true">?</span>
+          <span class="cr-text">
+            <span class="cur-name">Что-то не работает?</span>
+            <span class="cur-meta">Выбери, что не так, — подскажу и начну чинить</span>
+          </span>
+          <span class="chev">›</span>
+        </button>
        </div>
 
        <div class="home-side">
@@ -317,19 +334,23 @@
     <!-- Ещё: проверки, настройки, лог -->
     <section class="page" data-page="more">
       <div class="page-inner">
+        <div class="group simple-box">
+          <label class="check switch-row"><input type="checkbox" id="chk-simple" /> Простой вид</label>
+          <p class="hint">Только главное: гора, сервер и «Что-то не работает?». Маршруты, обход и лог прячутся —
+            всё по-прежнему работает, просто не мешает.</p>
+        </div>
+
         <div class="whatsnew" id="whatsnew">
-          <div class="wn-head"><b>Что нового в 0.13–0.16</b><button class="ghost small" id="btn-wn-hide">Скрыть</button></div>
+          <div class="wn-head"><b>Что нового в 0.14–0.17</b><button class="ghost small" id="btn-wn-hide">Скрыть</button></div>
+          <button class="wn-row" data-go="home"><span>0.17: «Пауза» — выключить VPN на 15 минут или час для банка, потом включится сам</span><span class="nav-meta">Главная, трей ›</span></button>
+          <button class="wn-row" data-go="home"><span>0.17: «Что-то не работает?» — одна кнопка на главной, сама начинает чинить</span><span class="nav-meta">Главная ›</span></button>
+          <button class="wn-row" data-go="more"><span>0.17: простой вид — только главное, без маршрутов и лога</span><span class="nav-meta">Ещё ›</span></button>
           <button class="wn-row" data-go="servers"><span>0.16: свой VPS друзьям — лимит ГБ и срок на каждого, сервер сам отключит</span><span class="nav-meta">Сервера → Свой сервер ›</span></button>
           <button class="wn-row" data-go="more:btn-apps-traffic"><span>0.16: трафик по программам — кто сколько качает</span><span class="nav-meta">Ещё ›</span></button>
           <button class="wn-row" data-go="servers"><span>0.16: белые списки 2.0 — мост через свой VPS в РФ, сам находит пробивающийся сервер</span><span class="nav-meta">Сервера → Свой сервер ›</span></button>
           <button class="wn-row" data-go="more:btn-settings"><span>0.16: серверы TUIC — через sing-box рядом с Xray</span><span class="nav-meta">Ещё → Настройки ›</span></button>
           <button class="wn-row" data-go="more:btn-settings"><span>0.15: мини-окно у часов, горячая клавиша, автоподключение при запуске программ</span><span class="nav-meta">Ещё → Настройки ›</span></button>
           <button class="wn-row" data-go="home"><span>0.14: боковое меню и кнопка-гора K2 — при подключении сходит лавина</span><span class="nav-meta">Главная ›</span></button>
-          <button class="wn-row" data-go="more:btn-settings"><span>0.13: kill switch — упал VPN, интернет закрыт, ничего не утечёт</span><span class="nav-meta">Ещё → Настройки ›</span></button>
-          <button class="wn-row" data-go="home"><span>0.12.1: новый дизайн — главная-дашборд, первый запуск в 3 шага</span><span class="nav-meta">Главная ›</span></button>
-          <button class="wn-row" data-go="bypass"><span>0.12.1: «Что не работает?» — обход по ситуации</span><span class="nav-meta">Обход ›</span></button>
-          <button class="wn-row" data-go="more:btn-settings"><span>0.12: настройки на весь комп сверяются, окно с правами — со своим профилем</span><span class="nav-meta">Ещё → Настройки ›</span></button>
-          <button class="wn-row" data-go="more:btn-settings"><span>0.12: новым — случайные порты прокси и шифрование серверов</span><span class="nav-meta">Ещё → Настройки ›</span></button>
           <button class="wn-row" data-go="more:btn-settings"><span>Защита от вирусов: права администратора — только у копии в Program Files</span><span class="nav-meta">Ещё → Настройки ›</span></button>
           <button class="wn-row" data-go="servers:btn-filters"><span>Фильтры серверов: страны, дубли, мёртвые</span><span class="nav-meta">Сервера → Фильтры ›</span></button>
           <button class="wn-row" data-go="servers"><span>Скорость всех серверов, «Авто» с учётом скорости</span><span class="nav-meta">Сервера → Скорость всех ›</span></button>
@@ -1092,6 +1113,25 @@
         <button type="button" class="ghost" id="btn-doh-cancel">Отмена</button>
         <span class="grow"></span>
         <button type="button" class="primary" id="btn-doh-save">Сохранить</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Что не работает: каждая кнопка сразу запускает нужную проверку или починку -->
+  <dialog id="dlg-help">
+    <div class="dlg wide">
+      <h2>Что не работает?</h2>
+      <div class="scen-grid help-grid">
+        <button type="button" class="scen" data-help="slow"><span class="scen-ico">⚡</span><b>VPN не подключается или тормозит</b><span>проверю все сервера и выберу самый быстрый</span></button>
+        <button type="button" class="scen" data-help="video"><span class="scen-ico">▶</span><b>YouTube или Discord тормозят</b><span>подберу обход zapret — без расхода трафика</span></button>
+        <button type="button" class="scen" data-help="tg"><span class="scen-ico">✈</span><b>Telegram не грузится</b><span>включу Telegram без VPN</span></button>
+        <button type="button" class="scen" data-help="site"><span class="scen-ico">🌐</span><b>Не открывается сайт</b><span>проверю, что с ним, и предложу, как пускать</span></button>
+        <button type="button" class="scen" data-help="bank"><span class="scen-ico">⏸</span><b>Банк или Госуслуги не пускают</b><span>поставлю VPN на паузу на 15 минут</span></button>
+        <button type="button" class="scen" data-help="report"><span class="scen-ico">✉</span><b>Ничего не помогло</b><span>соберу отчёт без паролей — отправь его разработчику</span></button>
+      </div>
+      <div class="dlg-actions">
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-help-close">Закрыть</button>
       </div>
     </div>
   </dialog>

@@ -28,6 +28,8 @@
 - Subscriptions from Marzban, Remnawave, 3x-ui and any VPN provider — with remaining traffic and expiry date.
 - **⚡ Auto** picks the fastest stable server and switches if it goes down.
 - Modes: **Browser** (system proxy), **Whole PC** (TUN — games and any app) and **No VPN**.
+- **Pause** for 15 minutes or an hour — for your bank, then VPN comes back by itself.
+- **“Something not working?”** — pick what's wrong and rxvpn starts fixing it. There's a simple view with just the essentials.
 - **Mini window by the clock**, the **Ctrl+Alt+V** hotkey and auto-connect when you start a chosen program (Discord, a game).
 - A server stops answering over one protocol — rxvpn tries the same server over another (say, Hysteria2 instead of VLESS).
 
