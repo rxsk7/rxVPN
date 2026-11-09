@@ -2,6 +2,14 @@
 resolver = "2"
 members = ["core", "src-tauri", "i18n-macros"]
 
+# Отладочная сборка (тесты, примеры): без полной отладочной информации у библиотек —
+# target в разы меньше, а номера строк в панике остаются.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 opt-level = "s"
 lto = true
