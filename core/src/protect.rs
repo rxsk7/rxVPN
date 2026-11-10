@@ -444,6 +444,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Живьём на настоящей папке данных: `RXVPN_LOCK_TEST=C:\…\data cargo test … -- --ignored data_lock_live`.
+    /// Подпапок не создаёт. Проверяет, что вся цепочка папок (рабочий стол, OneDrive…) проходит.
+    #[test]
+    #[ignore]
+    fn data_lock_live() {
+        let p = PathBuf::from(std::env::var("RXVPN_LOCK_TEST").expect("RXVPN_LOCK_TEST — путь к папке data"));
+        lock_data(&p, &[]).unwrap_or_else(|e| panic!("{e}"));
+        let have: Vec<&str> = DATA_SUBDIRS.iter().copied().filter(|s| p.join(s).exists()).collect();
+        // Те подпапки, что уже есть, — тоже настоящие (create_dir для них ничего не создаёт).
+        lock_data(&p, &have).unwrap_or_else(|e| panic!("{e}"));
+    }
+
     #[test]
     fn data_dir_rules() {
         let d = tmp("v");

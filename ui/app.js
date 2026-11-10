@@ -103,7 +103,7 @@ function cost(s, ms) {
 const shown = () => (V?.servers ?? []).filter((s) => !s.hidden);
 /** Что проверит «Проверить все»: видимые и мёртвые (чтобы ожившие вернулись). */
 const checkable = () => (V?.servers ?? []).filter((s) => !s.hidden || s.hidden === "dead");
-const HIDE_TEXT = { filter: tk("скрыт фильтром подписки"), dup: tk("дубль — такой же есть выше"), dead: tk("мёртвый — не ответил на последней проверке") };
+const HIDE_TEXT = { filter: tk("скрыт фильтром подписки"), dup: tk("дубль — такой же есть выше"), dead: tk("мёртвый — не ответил на последней проверке"), plain: tk("без шифрования — в «Авто» не идёт") };
 const filterOn = () => !!V && (V.list_filter?.hide_dead || V.list_filter?.dedup || V.subscriptions.some((x) => x.filter?.countries?.length || x.filter?.words?.length));
 
 /** id лучшего из проверенных: по задержке и скорости, как выбирает «Авто». */

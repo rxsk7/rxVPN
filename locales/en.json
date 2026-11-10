@@ -727,6 +727,7 @@
  "без лимита": "no limit",
  "без названия": "untitled",
  "без обхода": "no bypass",
+ "без шифрования": "no encryption",
  "белые списки: ищу сервер, который пробивается (проверяю {})": "whitelists: looking for a server that gets through (checking {})",
  "белые списки: пробивается «{}» ({ms} мс) — запомнил его": "whitelists: “{}” gets through ({ms} ms) — remembered it",
  "белые списки? {} (разрешённых открылось {l}/3, обычных {o}/5)": "whitelists? {} (allowed opened {l}/3, regular {o}/5)",

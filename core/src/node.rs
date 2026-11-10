@@ -130,6 +130,46 @@ pub struct Node {
 }
 
 impl Node {
+    /// Сервер без шифрования: между компом и сервером трафик идёт открытым текстом —
+    /// провайдер видит адреса сайтов и всё, что не зашифровано самим сайтом. Так бывает:
+    /// VLESS без TLS/Reality и без своего шифрования, VMess с `scy=none|zero`, Trojan
+    /// без TLS, Shadowsocks с методом none, SOCKS/HTTP из JSON-подписки. Такой сервер
+    /// может подсунуть и тот, кто подменил подписку по дороге. В «Авто» их не берём.
+    pub fn plain(&self) -> bool {
+        if self.transport.network == "tuic" {
+            return false; // QUIC + TLS всегда
+        }
+        let tls = |sec: &str| matches!(sec, "tls" | "reality");
+        let none = |v: Option<&str>| matches!(v.map(str::trim), None | Some("" | "none"));
+        if let Some(o) = self.raw.as_ref().map(|r| &r["outbounds"][0]).filter(|o| o.is_object()) {
+            if tls(o["streamSettings"]["security"].as_str().unwrap_or("none")) {
+                return false;
+            }
+            let s = &o["settings"];
+            // Пользователь: vnext[0].users[0] (старый вид) или прямо в settings (новый).
+            let user = |k: &str| s["vnext"][0]["users"][0][k].as_str().or_else(|| s[k].as_str());
+            let server = |k: &str| s["servers"][0][k].as_str().or_else(|| s[k].as_str());
+            return match crate::defang::fold(o["protocol"].as_str().unwrap_or("")).as_str() {
+                "vless" => none(user("encryption")),
+                "vmess" => matches!(user("security").map(str::trim), Some("none" | "zero")),
+                "trojan" | "socks" | "http" => true,
+                "shadowsocks" => matches!(server("method").map(str::trim), None | Some("" | "none" | "plain")),
+                // hysteria, wireguard — шифруют сами.
+                _ => false,
+            };
+        }
+        if tls(&self.security.kind) {
+            return false;
+        }
+        match self.protocol {
+            Protocol::Vless => none(self.encryption.as_deref()),
+            Protocol::Vmess => matches!(self.method.as_deref().map(str::trim), Some("none" | "zero")),
+            Protocol::Trojan => true,
+            Protocol::Shadowsocks => matches!(self.method.as_deref().map(str::trim), None | Some("" | "none" | "plain")),
+            Protocol::Other => false,
+        }
+    }
+
     /// Короткое описание для списка: "VLESS · xhttp · reality".
     pub fn summary(&self) -> String {
         if self.transport.network == "tuic" {
@@ -160,4 +200,37 @@ pub fn fnv64(data: &str) -> String {
         h = h.wrapping_mul(0x100000001b3);
     }
     format!("{h:016x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parse_link;
+
+    #[test]
+    fn plain_servers_are_recognized() {
+        let plain = |l: &str| parse_link(l).unwrap().plain();
+        let u = "11111111-2222-3333-4444-555555555555";
+        // Без TLS и без своего шифрования — открытый текст.
+        assert!(plain(&format!("vless://{u}@h.example:80?type=ws&path=%2F#x")));
+        assert!(plain(&format!("vless://{u}@h.example:80?type=tcp&security=none&encryption=none#x")));
+        // TLS или Reality — шифруется.
+        assert!(!plain(&format!("vless://{u}@h.example:443?type=ws&security=tls&sni=h.example#x")));
+        assert!(!plain(&format!("vless://{u}@h.example:443?type=tcp&security=reality&pbk=Zx9vQk3mN7pL2wR8tY5uB1cD4eF6gH0jK9lM3nO7pQs&sid=ab&sni=a.com#x")));
+        // Shadowsocks шифрует сам.
+        assert!(!plain("ss://YWVzLTI1Ni1nY206c3NwYXNzd29yZDEyMw@45.83.12.200:8388#FI"));
+
+        // JSON-подписка.
+        let raw = |o: serde_json::Value| {
+            let mut n = parse_link(&format!("vless://{u}@h.example:443?type=tcp&security=tls#x")).unwrap();
+            n.raw = Some(serde_json::json!({ "outbounds": [o] }));
+            n.plain()
+        };
+        assert!(raw(serde_json::json!({"protocol": "socks", "settings": {"servers": [{"address": "h.example", "port": 1080}]}})));
+        assert!(raw(serde_json::json!({"protocol": "vless", "settings": {"vnext": [{"address": "h", "port": 80, "users": [{"id": u, "encryption": "none"}]}]}, "streamSettings": {"network": "ws"}})));
+        assert!(raw(serde_json::json!({"protocol": "vmess", "settings": {"vnext": [{"address": "h", "port": 80, "users": [{"id": u, "security": "zero"}]}]}})));
+        assert!(!raw(serde_json::json!({"protocol": "vmess", "settings": {"vnext": [{"address": "h", "port": 80, "users": [{"id": u, "security": "auto"}]}]}})));
+        assert!(!raw(serde_json::json!({"protocol": "vless", "settings": {"vnext": [{"address": "h", "port": 443, "users": [{"id": u, "encryption": "none"}]}]}, "streamSettings": {"network": "tcp", "security": "reality"}})));
+        assert!(!raw(serde_json::json!({"protocol": "wireguard", "settings": {"peers": [{"endpoint": "h:51820"}]}})));
+        assert!(!raw(serde_json::json!({"protocol": "hysteria", "settings": {"address": "h", "port": 443}})));
+    }
 }

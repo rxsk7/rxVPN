@@ -814,6 +814,7 @@ window.RX_EN = {
  "мимо VPN: {appsN}": "bypassing VPN: {appsN}",
  "мимо: {nd} · VPN: {np}": "bypass: {nd} · VPN: {np}",
  "мёртвый — не ответил на последней проверке": "dead — didn't respond at the last check",
+ "без шифрования — в «Авто» не идёт": "no encryption — not used in Auto",
  "нажми, чтобы подобрать стратегию": "click to find a strategy",
  "например, site.com или https://site.com/page": "e.g. site.com or https://site.com/page",
  "напрямую": "direct",

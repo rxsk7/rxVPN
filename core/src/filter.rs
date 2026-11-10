@@ -86,6 +86,8 @@ pub enum Hide {
     Dup,
     /// Последняя проверка не прошла.
     Dead,
+    /// Без шифрования (`Node::plain`): в «Авто» не идёт, пока человек не выберет его сам.
+    Plain,
 }
 
 pub const MAX_COUNTRIES: usize = 40;
@@ -309,6 +311,8 @@ pub fn hidden(store: &Store, dead: impl Fn(&str) -> bool) -> HashMap<String, Hid
         let f = n.sub_id.as_deref().and_then(|s| filters.get(s));
         if f.is_some_and(|f| !f.matches(&n.name)) {
             out.insert(n.id.clone(), Hide::Filter);
+        } else if n.plain() {
+            out.insert(n.id.clone(), Hide::Plain);
         }
     }
     if store.list_filter.dedup {
@@ -503,7 +507,7 @@ mod tests {
     }
 
     fn node(id: &str, name: &str, addr: &str, uuid: &str, sub: Option<&str>) -> Node {
-        let link = format!("vless://{uuid}@{addr}:443?type=tcp&security=none#{name}");
+        let link = format!("vless://{uuid}@{addr}:443?type=tcp&security=tls#{name}");
         let mut n = crate::link::parse_link(&link).unwrap();
         n.id = id.into();
         n.sub_id = sub.map(String::from);
@@ -576,12 +580,27 @@ mod tests {
     }
 
     #[test]
+    fn plain_servers_stay_out_of_auto() {
+        let u = "11111111-1111-1111-1111-111111111111";
+        let mut s = Store::default();
+        s.import_links(&format!("vless://{u}@safe.example:443?type=tcp&security=tls#safe
+vless://{u}@open.example:80?type=ws#open"));
+        let open = s.servers.iter().find(|n| n.name == "open").unwrap().id.clone();
+        s.selected = Some(crate::store::AUTO_ID.into());
+        assert_eq!(hidden(&s, |_| false).get(&open), Some(&Hide::Plain));
+        assert_eq!(visible(&s, |_| false).iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["safe"]);
+        // Выбрал сам — не скрываем: это его решение.
+        s.selected = Some(open.clone());
+        assert!(!hidden(&s, |_| false).contains_key(&open));
+    }
+
+    #[test]
     fn filter_survives_refresh_and_backup() {
         let mut s = store();
         s.subscriptions[0].filter = parse("NL", "-test").unwrap();
         s.list_filter = ListFilter { hide_dead: true, dedup: true };
-        let body = "vless://11111111-1111-1111-1111-111111111111@x.example:443?type=tcp#🇩🇪 new\n\
-                    vless://11111111-1111-1111-1111-111111111111@y.example:443?type=tcp#🇳🇱 new";
+        let body = "vless://11111111-1111-1111-1111-111111111111@x.example:443?type=tcp&security=tls#🇩🇪 new\n\
+                    vless://11111111-1111-1111-1111-111111111111@y.example:443?type=tcp&security=tls#🇳🇱 new";
         s.apply_subscription("a", body, 1);
         assert_eq!(s.subscriptions[0].filter.countries, ["NL"]);
         let vis = visible(&s, |_| false);

@@ -538,7 +538,7 @@ fn view(st: &AppState) -> View {
             .map(|n| ServerView {
                 id: n.id.clone(),
                 name: n.name.clone(),
-                summary: n.summary(),
+                summary: if n.plain() { format!("{} · ⚠ {}", n.summary(), trs!("без шифрования")) } else { n.summary() },
                 address: n.address.clone(),
                 port: n.port,
                 sub_id: n.sub_id.clone(),
