@@ -378,28 +378,40 @@ fn persist(st: &AppState) {
     let _ = s.save(&st.paths.store);
     // Копия с правами — снимок охраняемых настроек рядом с собой (см. guard_settings).
     if st.paths.protected && winsys::is_admin() {
-        let _ = rxvpn_core::guard::save(&st.paths.app_dir, &s.settings);
+        let _ = rxvpn_core::guard::save(&st.paths.app_dir, &s);
     }
 }
 
 /// При запуске копии с правами: охраняемые настройки (DoH всей Windows, прокси в
 /// локальную сеть, DNS, своя папка zapret) поменялись не ею — спросить. «Нет» (по
 /// умолчанию) — вернуть из снимка. Итог сразу сохраняется (и в state.json, и в снимок).
-fn guard_settings(paths: &Paths, store: &mut Store) {
+fn guard_settings(paths: &Paths, store: &mut Store) -> bool {
     use rxvpn_core::guard;
     let trusted = guard::load(&paths.app_dir);
     let changes = guard::diff(&store.settings, trusted.as_ref());
-    if changes.is_empty() {
-        if trusted.is_none() {
-            let _ = guard::save(&paths.app_dir, &store.settings);
-        }
-        return;
-    }
-    if !winsys::confirm_box("rxvpn", &guard::prompt(&changes)) {
+    let servers = guard::servers_changed(store, trusted.as_ref());
+    let mut dirty = false;
+    if !changes.is_empty() && !winsys::confirm_box("rxvpn", &guard::prompt(&changes)) {
         guard::revert(&mut store.settings, trusted.as_ref());
+        dirty = true;
+    }
+    // Сервера из снимка не вернуть (там только отпечаток): «Нет» — не подключаться самому.
+    let servers_refused = servers && !winsys::confirm_box("rxvpn", &guard::prompt_servers());
+    if servers_refused {
+        store.settings.auto_connect = false;
+        store.settings.connect_apps.clear();
+        store.settings.net_profiles = false;
+        dirty = true;
+    }
+    if dirty {
         let _ = store.save(&paths.store);
     }
-    let _ = guard::save(&paths.app_dir, &store.settings);
+    let _ = if servers_refused {
+        guard::save_keeping_servers(&paths.app_dir, store, trusted.as_ref())
+    } else {
+        guard::save(&paths.app_dir, store)
+    };
+    servers_refused
 }
 
 /// Итог проверки — для отчёта «Сообщить о проблеме» (по одному на вид).
@@ -583,6 +595,41 @@ fn changed(app: &AppHandle) {
 // ---------------- запуск / остановка ----------------
 
 fn stop_core(st: &AppState) {
+    stop_core_ex(st, false);
+}
+
+/// Системный прокси, оставленный на время перезапуска ядра (смена сервера, «Авто»,
+/// настройки). Раньше прокси снимался на эти секунды, и браузер ходил напрямую — с
+/// настоящим IP. Теперь он смотрит на закрытый локальный порт и ждёт. Перезапуск не
+/// удался (Drop, пока не `keep`) — прокси снимаем: rxvpn показывает «отключено», и
+/// интернет без VPN в этот момент — уже не сюрприз.
+struct ProxyHold<'a> {
+    st: &'a AppState,
+    armed: bool,
+}
+
+impl ProxyHold<'_> {
+    /// Новое ядро поднялось — прокси остаётся.
+    fn keep(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ProxyHold<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        if let Some(addr) = self.st.proxy_set.lock().unwrap().take() {
+            if sysproxy::current().as_deref() == Some(addr.as_str()) {
+                let _ = sysproxy::disable();
+            }
+        }
+    }
+}
+
+/// `keep_proxy` — не трогать системный прокси (см. `ProxyHold`).
+fn stop_core_ex(st: &AppState, keep_proxy: bool) {
     st.gen.fetch_add(1, Ordering::SeqCst);
     let p = st.proc.lock().unwrap().take();
     if let Some(mut p) = p {
@@ -592,6 +639,9 @@ fn stop_core(st: &AppState) {
     *st.active_tag.lock().unwrap() = None;
     st.ping.store(0, Ordering::SeqCst);
     st.tun_active.store(false, Ordering::SeqCst);
+    if keep_proxy {
+        return;
+    }
     let addr = st.proxy_set.lock().unwrap().take();
     if let Some(addr) = addr {
         // Выключаем, только если там всё ещё наш адрес — вдруг человек
@@ -809,7 +859,10 @@ fn start_core_ex(app: &AppHandle, st: &AppState, allow_tun: bool, how: HybridSta
     }
 
     let was_connected = is_connected(st);
-    stop_core(st);
+    // Перезапуск в том же режиме «Браузер»: прокси не снимаем — без окна трафика напрямую.
+    let hold_proxy = was_connected && settings.system_proxy && !settings.tun && st.proxy_set.lock().unwrap().is_some();
+    stop_core_ex(st, hold_proxy);
+    let proxy_hold = ProxyHold { st, armed: hold_proxy };
     stop_zapret(st); // zapret-без-VPN и VPN вместе не работают (гибрид поднимем ниже заново)
 
     for p in [settings.socks_port, settings.http_port] {
@@ -1021,6 +1074,7 @@ fn start_core_ex(app: &AppHandle, st: &AppState, allow_tun: bool, how: HybridSta
             Err(e) => log(app, tr!("системный прокси не выставлен: {e}")),
         }
     }
+    proxy_hold.keep();
 
     // Ядро могло упасть ровно в момент, пока мы ставили прокси.
     if died_early || st.gen.load(Ordering::SeqCst) != my_gen {
@@ -5127,7 +5181,7 @@ pub fn run() {
     let args: Vec<String> = std::env::args().collect();
     let has = |a: &str| args.iter().any(|x| x == a);
     let from_autostart = has("--autostart");
-    let connect_now = has("--connect");
+    let mut connect_now = has("--connect");
     let relaunched = has("--relaunched");
     let zapret_test_now = has("--zapret-test");
 
@@ -5210,11 +5264,30 @@ pub fn run() {
         }
         return;
     }
-    // До 0.6 конфиги Xray с паролями серверов на время запуска писались в data —
-    // после падения они могли остаться. Теперь конфиг идёт через stdin.
-    for f in ["config.json", "test.json", "check.json", "svc.json"] {
-        let _ = std::fs::remove_file(paths.data.join(f));
-    }
+    // Копия с правами: папка данных доступна на запись программам без прав. Закрываем её
+    // (и папки выше, и подпапки) от подмены ссылкой до первой работы с файлами — иначе rxvpn
+    // с правами администратора записал бы или удалил файл там, куда покажет ссылка
+    // (core/src/protect.rs, `lock_data`). Замок держится до выхода.
+    let _data_lock = if paths.protected && winsys::is_admin() {
+        rxvpn_core::i18n::set_lang(rxvpn_core::i18n::system_lang());
+        let _ = std::fs::create_dir_all(&paths.data);
+        match rxvpn_core::protect::lock_data(&paths.data, rxvpn_core::protect::DATA_SUBDIRS) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                winsys::message_box("rxvpn", &tr!("Папка данных rxvpn не прошла проверку — с правами администратора не запускаюсь.\n\n{e}"));
+                return;
+            }
+        }
+    } else {
+        // До 0.6 конфиги Xray с паролями серверов на время запуска писались в data —
+        // после падения они могли остаться. Теперь конфиг идёт через stdin. (Копия с
+        // правами появилась в 0.11 — у неё таких файлов не бывает, и удалять по именам
+        // в папке, куда пишут без прав, ей незачем.)
+        for f in ["config.json", "test.json", "check.json", "svc.json"] {
+            let _ = std::fs::remove_file(paths.data.join(f));
+        }
+        None
+    };
     // Язык: до чтения настроек — как в Windows (сообщения о битом state.json), потом — из настроек.
     rxvpn_core::i18n::set_lang(rxvpn_core::i18n::system_lang());
     let (mut store, state_locked) = Store::load_ex(&paths.store);
@@ -5222,7 +5295,10 @@ pub fn run() {
     // Копия с правами: настройки, действующие на весь комп, сверяем со своим снимком
     // в Program Files — state.json в data мог поменять кто угодно без прав (core/src/guard.rs).
     if paths.protected && winsys::is_admin() && !state_locked {
-        guard_settings(&paths, &mut store);
+        // На вопрос про чужие сервера ответили «Нет» — и по --connect сами не подключаемся.
+        if guard_settings(&paths, &mut store) {
+            connect_now = false;
+        }
     }
     let stats = rxvpn_core::stats::Stats::load(&paths.data.join("stats.json"));
 

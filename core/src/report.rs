@@ -511,6 +511,49 @@ fn when(now: i64, at: i64) -> String {
     }
 }
 
+/// Строки ядра называют сайты, на которые ходил человек («accepted tcp:site.com:443»,
+/// «sniffed domain: site.com»): в отчёте, который вставляют в публичный issue, им не место.
+/// Имя сайта → «<site>»; порт, протокол и выход остаются — для разбора хватает. Адреса
+/// своих серверов не трогаем: их дальше заменит `redact` на «<сервер-N>».
+fn hide_sites(line: &str, s: &Secrets) -> String {
+    if !(line.starts_with("[xray]") || line.starts_with("[sing-box]")) {
+        return line.to_string();
+    }
+    let known = |h: &str| {
+        let h = h.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
+        h.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified()) || s.hosts.iter().any(|(x, _)| *x == h)
+    };
+    let mut out = String::with_capacity(line.len());
+    let mut after_domain = false;
+    for w in line.split_inclusive(' ') {
+        let (word, gap) = match w.strip_suffix(' ') {
+            Some(x) => (x, " "),
+            None => (w, ""),
+        };
+        let was_domain = std::mem::replace(&mut after_domain, word == "domain:");
+        let dest = ["tcp:", "udp:"].iter().find_map(|p| word.strip_prefix(p).map(|r| (*p, r)));
+        if let Some((proto, rest)) = dest {
+            // «host:port» (+ возможный хвост из знаков после порта).
+            if let Some((host, port)) = rest.rsplit_once(':') {
+                if !host.is_empty() && !known(host) {
+                    out.push_str(proto);
+                    out.push_str("<site>:");
+                    out.push_str(port);
+                    out.push_str(gap);
+                    continue;
+                }
+            }
+        } else if was_domain && !word.is_empty() && !known(word) {
+            out.push_str("<site>");
+            out.push_str(gap);
+            continue;
+        }
+        out.push_str(word);
+        out.push_str(gap);
+    }
+    out
+}
+
 /// Собрать отчёт и вырезать секреты.
 pub fn build(i: &Input, s: &Secrets) -> String {
     let mut t = String::new();
@@ -554,7 +597,7 @@ pub fn build(i: &Input, s: &Secrets) -> String {
     let start = i.log.len().saturating_sub(LOG_LINES);
     t.push_str(&tr!("\n--- Лог (последние {} строк) ---\n", i.log.len() - start));
     for l in &i.log[start..] {
-        t.push_str(l);
+        t.push_str(&hide_sites(l, s));
         t.push('\n');
     }
     // Windows-переводы строк: отчёт часто открывают в Блокноте.
@@ -679,6 +722,27 @@ mod tests {
         sec.hosts.push(("1.2.3.4".into(), "<сервер-1>".into()));
         sec.hosts.push(("vpn.io".into(), "<сервер-2>".into()));
         assert_eq!(redact("11.2.3.45 и 1.2.3.4. и myvpn.io и vpn.io:443", &sec), "<ip> и <сервер-1>. и myvpn.io и <сервер-2>:443");
+    }
+
+    #[test]
+    fn visited_sites_are_hidden() {
+        let r = report(&[
+            "[xray] 2026/11/02 12:00:01 from 127.0.0.1:50123 accepted tcp:secret-forum.example:443 [socks -> proxy]",
+            "[xray] 2026/11/02 12:00:02 from 127.0.0.1:50124 accepted udp:[2a00:1450:4010::5]:443 [tun -> direct]",
+            "[xray] app/dispatcher: sniffed domain: my-bank.example",
+            "[xray] proxy/vless/outbound: tunneling request to tcp:secret-forum.example:443 via nl1.myvpn-panel.xyz:443",
+            "[xray] 2026/11/02 12:00:03 from 127.0.0.1:50125 accepted tcp:nl1.myvpn-panel.xyz:443 [socks -> proxy]",
+            "[rxvpn] проверка tcp:not-xray.example:443",
+        ]);
+        for bad in ["secret-forum", "my-bank", "2a00:1450", "myvpn-panel"] {
+            assert!(!r.contains(bad), "осталось «{bad}»:\n{r}");
+        }
+        assert!(r.contains("accepted tcp:<site>:443 [socks -> proxy]"), "{r}");
+        assert!(r.contains("accepted udp:<site>:443 [tun -> direct]"), "{r}");
+        assert!(r.contains("sniffed domain: <site>"), "{r}");
+        assert!(r.contains("accepted tcp:<сервер-1>:443"), "свой сервер — номером, не «сайтом»:\n{r}");
+        assert!(r.contains("from 127.0.0.1:50123"), "{r}");
+        assert!(r.contains("not-xray.example"), "строки самого rxvpn не трогаем:\n{r}");
     }
 
     #[test]

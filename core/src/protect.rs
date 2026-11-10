@@ -210,6 +210,95 @@ pub fn valid_data_dir(p: &Path) -> bool {
     p.is_absolute() && p.is_dir() && !s.starts_with(r"\\") && !s.contains('"') && !crate::winsys::is_remote_drive(&s)
 }
 
+/// Папки данных, закрытые от подмены, пока это держим (см. `lock_data`).
+pub struct DataLock {
+    _dirs: Vec<std::fs::File>,
+}
+
+/// Подпапки data, в которые копия с правами пишет сама: списки рядом с ядром, страховочные
+/// копии, zapret (стратегии — внутри), состояние Tor.
+pub const DATA_SUBDIRS: &[&str] = &["core", "backups", "zapret", "tor"];
+
+/// Открыть папку так, чтобы её нельзя было переименовать, удалить или заменить ссылкой,
+/// пока дескриптор открыт, и убедиться, что это настоящая папка, а не ссылка
+/// (junction, symlink): ссылку Windows открывает как саму ссылку, а не как её цель.
+fn lock_dir(p: &Path) -> Result<std::fs::File, String> {
+    let bad = || tr!("{} — не обычная папка (ссылка?). С правами администратора rxvpn с такой папкой данных не работает: положи rxvpn в обычную папку", p.display());
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_READ_ATTRIBUTES: u32 = 0x80;
+        const SYNCHRONIZE: u32 = 0x0010_0000;
+        const FILE_SHARE_READ_WRITE: u32 = 1 | 2; // без FILE_SHARE_DELETE: папку не убрать и не переименовать
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000; // иначе папку не открыть
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000; // ссылку — как ссылку
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        let f = std::fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+            .share_mode(FILE_SHARE_READ_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(p)
+            .map_err(|e| format!("{}: {e}", p.display()))?;
+        // Атрибуты и вид «точки повторного разбора» — у открытого дескриптора, не по пути.
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{FileAttributeTagInfo, GetFileInformationByHandleEx, FILE_ATTRIBUTE_TAG_INFO};
+        let mut info = FILE_ATTRIBUTE_TAG_INFO { FileAttributes: 0, ReparseTag: 0 };
+        let ok = unsafe {
+            GetFileInformationByHandleEx(f.as_raw_handle() as _, FileAttributeTagInfo, &mut info as *mut _ as *mut _, std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32)
+        };
+        if ok == 0 {
+            return Err(format!("{}: {}", p.display(), std::io::Error::last_os_error()));
+        }
+        // Ссылка — это точка с признаком «имя-заменитель» (junction, symlink): она уводит
+        // путь в другое место. Папки OneDrive («файлы по запросу») — тоже точки повторного
+        // разбора, но никуда не ведут: рабочий стол в OneDrive — обычное дело, их пускаем.
+        const NAME_SURROGATE: u32 = 0x2000_0000;
+        let link = info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 && info.ReparseTag & NAME_SURROGATE != 0;
+        if link || info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+            return Err(bad());
+        }
+        Ok(f)
+    }
+    #[cfg(not(windows))]
+    {
+        let m = std::fs::symlink_metadata(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        if !m.is_dir() {
+            return Err(bad());
+        }
+        std::fs::File::open(p).map_err(|e| format!("{}: {e}", p.display()))
+    }
+}
+
+/// Копия с правами администратора пишет и удаляет файлы в папке данных, а туда пишет любая
+/// программа без прав. Сделай она саму папку (или папку выше, или подпапку) ссылкой —
+/// rxvpn с правами записал бы или удалил файл там, куда покажет ссылка. Поэтому до первой
+/// работы с файлами: вся цепочка папок от диска до data и подпапки из `subdirs` — настоящие
+/// папки, и открыты так, что до выхода rxvpn их не подменить. Подпапки, которых ещё нет,
+/// создаём сами (в уже закрытой data): подложенная заранее ссылка проверку не пройдёт.
+pub fn lock_data(data: &Path, subdirs: &[&str]) -> Result<DataLock, String> {
+    if !data.is_absolute() {
+        return Err(tr!("{} — нужен полный путь к папке данных", data.display()));
+    }
+    let mut dirs = Vec::new();
+    // От корня диска вниз: сначала закрыта папка, потом проверяется то, что в ней.
+    let mut chain: Vec<&Path> = data.ancestors().filter(|p| !p.as_os_str().is_empty()).collect();
+    chain.reverse();
+    for p in chain {
+        dirs.push(lock_dir(p)?);
+    }
+    for s in subdirs {
+        let p = data.join(s);
+        match std::fs::create_dir(&p) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("{}: {e}", p.display())),
+        }
+        dirs.push(lock_dir(&p)?);
+    }
+    Ok(DataLock { _dirs: dirs })
+}
+
 /// Файл в папке копии с путём к папке data портативной.
 const DATA_PATH_FILE: &str = "data-path.txt";
 
@@ -297,6 +386,61 @@ mod tests {
         assert!(needs_core_download(&data_core, &table));
         assert!(deploy(&exe, &src, &data_core, &pf, &table, None).is_err());
         assert_eq!(std::fs::read(pf.join("core").join(x)).unwrap(), b"official xray", "старое ядро на месте");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Ссылка на папку без прав администратора: junction в Windows, symlink в остальных.
+    fn link_dir(link: &Path, target: &Path) {
+        #[cfg(windows)]
+        {
+            let ok = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(link).arg(target).output().unwrap().status.success();
+            assert!(ok, "mklink /J не сработал");
+        }
+        #[cfg(not(windows))]
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    #[test]
+    fn data_lock_refuses_links() {
+        let root = std::fs::canonicalize(tmp("lock")).unwrap();
+        // canonicalize в Windows даёт \\?\C:\… — обычный вид пути.
+        let root = PathBuf::from(root.to_string_lossy().trim_start_matches(r"\\?\").to_string());
+        let (data, outside) = (root.join("portable").join("data"), root.join("outside"));
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        // Обычная папка: подпапки создаются, замок берётся.
+        let lock = lock_data(&data, DATA_SUBDIRS).unwrap();
+        assert!(DATA_SUBDIRS.iter().all(|s| data.join(s).is_dir()));
+        // Пока замок держим, папку данных не убрать и не переименовать (в Windows).
+        #[cfg(windows)]
+        assert!(std::fs::rename(&data, root.join("portable").join("data2")).is_err(), "data переименовалась под замком");
+        // А файлы внутри — пишутся и удаляются.
+        std::fs::write(data.join("state.json"), b"{}").unwrap();
+        std::fs::remove_file(data.join("state.json")).unwrap();
+        drop(lock);
+
+        // Подпапка — ссылка наружу: отказ, и наружу ничего не записано.
+        std::fs::remove_dir(data.join("core")).unwrap();
+        link_dir(&data.join("core"), &outside);
+        assert!(lock_data(&data, DATA_SUBDIRS).is_err());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+        std::fs::remove_dir(data.join("core")).or_else(|_| std::fs::remove_file(data.join("core"))).unwrap();
+
+        // Сама data — ссылка: отказ.
+        let real = root.join("portable").join("real");
+        std::fs::rename(&data, &real).unwrap();
+        link_dir(&data, &real);
+        assert!(lock_data(&data, &[]).is_err());
+        // Папка выше — ссылка: отказ.
+        let via = root.join("via");
+        link_dir(&via, &root.join("portable"));
+        assert!(lock_data(&via.join("real"), &[]).is_err());
+        assert!(lock_data(&real, &[]).is_ok());
+        assert!(lock_data(Path::new("relative/data"), &[]).is_err());
+
+        let _ = std::fs::remove_dir(&via).or_else(|_| std::fs::remove_file(&via));
+        let _ = std::fs::remove_dir(&data).or_else(|_| std::fs::remove_file(&data));
         let _ = std::fs::remove_dir_all(&root);
     }
 

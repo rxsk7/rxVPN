@@ -31,6 +31,15 @@ pub const LAN_V6: &[([u8; 16], u8)] = &[
     ([0xff, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 8),
 ];
 
+/// Веса фильтров на «полке» rxvpn: больше — главнее. Порядок важен:
+/// loopback и свои программы (Xray, rxvpn) > туннель > блок DNS > локальная сеть и DHCP > блок всего.
+/// Блок DNS стоит между туннелем и локальной сетью: DNS через туннель и от самого Xray
+/// проходит, а запрос к роутеру (192.168.x.x:53) — нет.
+pub const W_APP: u8 = 15;
+pub const W_TUN: u8 = 14;
+pub const W_DNS_BLOCK: u8 = 13;
+pub const W_LAN: u8 = 12;
+
 /// Включённый kill switch. Drop — фильтры снимаются (закрывается динамическая сессия).
 pub struct KillSwitch {
     #[cfg(windows)]
@@ -112,6 +121,9 @@ mod imp {
     /// Своя «полка» фильтров rxvpn (постоянный GUID — видно в `netsh wfp show filters`).
     const SUBLAYER: GUID = GUID::from_u128(0x7a1f_3c9e_52b4_4d0a_9e61_8c2b_5f40_d713);
     const RPC_C_AUTHN_WINNT: u32 = 10;
+
+    // Веса фильтров (больше — главнее; «заблокировать всё» — 0).
+    use super::{W_APP, W_DNS_BLOCK, W_LAN, W_TUN};
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(Some(0)).collect()
@@ -231,14 +243,14 @@ mod imp {
                     // 1. Всё остальное — в блок.
                     self.add(layer, 0, FWP_ACTION_BLOCK, &mut [])?;
                     // 2. loopback (127.0.0.1, ::1 — локальные прокси rxvpn и всё, что слушает localhost).
-                    self.add(layer, 15, FWP_ACTION_PERMIT, &mut [Cond {
+                    self.add(layer, W_APP, FWP_ACTION_PERMIT, &mut [Cond {
                         field: FWPM_CONDITION_FLAGS,
                         mt: FWP_MATCH_FLAGS_ALL_SET,
                         val: Val::U32(FWP_CONDITION_FLAG_IS_LOOPBACK),
                     }])?;
                     // 3. Xray и rxvpn.exe: туннель к серверу и служебные проверки.
                     for b in &ids {
-                        self.add(layer, 14, FWP_ACTION_PERMIT, &mut [Cond { field: FWPM_CONDITION_ALE_APP_ID, mt: FWP_MATCH_EQUAL, val: Val::Blob(*b) }])?;
+                        self.add(layer, W_APP, FWP_ACTION_PERMIT, &mut [Cond { field: FWPM_CONDITION_ALE_APP_ID, mt: FWP_MATCH_EQUAL, val: Val::Blob(*b) }])?;
                     }
                     // 4. Локальная сеть (условия с одним полем WFP складывает через «или»).
                     let mut lan: Vec<Cond> = if v6 {
@@ -260,9 +272,19 @@ mod imp {
                             })
                             .collect()
                     };
-                    self.add(layer, 13, FWP_ACTION_PERMIT, &mut lan)?;
+                    self.add(layer, W_LAN, FWP_ACTION_PERMIT, &mut lan)?;
+                    // 4½. DNS мимо туннеля — в блок, даже в локальную сеть: иначе, пока Xray лежит,
+                    //     Windows спросит роутер, тот — провайдера, и провайдер увидит имена сайтов.
+                    //     (Пока Xray жив, это делает он сам — autoSystemWfpBlockLeak; тут — на случай
+                    //     его падения.) Туннель и сам Xray весят больше и DNS не теряют.
+                    for proto in [17u8, 6] {
+                        self.add(layer, W_DNS_BLOCK, FWP_ACTION_BLOCK, &mut [
+                            Cond { field: FWPM_CONDITION_IP_PROTOCOL, mt: FWP_MATCH_EQUAL, val: Val::U8(proto) },
+                            Cond { field: FWPM_CONDITION_IP_REMOTE_PORT, mt: FWP_MATCH_EQUAL, val: Val::U16(53) },
+                        ])?;
+                    }
                     // 5. DHCP — иначе адрес от роутера не продлится и сеть отвалится вовсе.
-                    self.add(layer, 13, FWP_ACTION_PERMIT, &mut [
+                    self.add(layer, W_LAN, FWP_ACTION_PERMIT, &mut [
                         Cond { field: FWPM_CONDITION_IP_PROTOCOL, mt: FWP_MATCH_EQUAL, val: Val::U8(17) },
                         Cond { field: FWPM_CONDITION_IP_REMOTE_PORT, mt: FWP_MATCH_EQUAL, val: Val::U16(if v6 { 547 } else { 67 }) },
                     ])?;
@@ -300,7 +322,7 @@ mod imp {
                     unsafe { FwpmFilterDeleteById0(self.h, id) };
                 }
                 for layer in [FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6] {
-                    let id = self.add(layer, 12, FWP_ACTION_PERMIT, &mut [Cond {
+                    let id = self.add(layer, W_TUN, FWP_ACTION_PERMIT, &mut [Cond {
                         field: FWPM_CONDITION_IP_LOCAL_INTERFACE,
                         mt: FWP_MATCH_EQUAL,
                         val: Val::U64(Box::new(luid)),
@@ -349,6 +371,14 @@ mod tests {
         assert!(!inside(0x0808_0808)); // 8.8.8.8
         assert!(!inside(0xC633_6407)); // 198.51.100.7
         assert!(inside(0xC0A8_0101)); // 192.168.1.1
+    }
+
+    #[test]
+    fn dns_block_sits_between_tunnel_and_lan() {
+        assert!(W_APP > W_DNS_BLOCK, "Xray сам узнаёт адрес сервера — его DNS не режем");
+        assert!(W_TUN > W_DNS_BLOCK, "DNS через туннель проходит");
+        assert!(W_DNS_BLOCK > W_LAN, "DNS к роутеру — в блок, хотя локальная сеть разрешена");
+        assert!(W_LAN > 0 && W_APP <= 15, "вес — FWP_UINT8 от 0 до 15");
     }
 
     #[test]

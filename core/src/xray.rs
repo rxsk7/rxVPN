@@ -1468,8 +1468,11 @@ pub fn build_run_config(up: &Upstream, s: &Settings, o: &RunOpts) -> Value {
         routing["balancers"] = Value::Array(plan.balancers.clone());
     }
 
+    // state.json мог поправить кто угодно, а при загрузке настройки не проверяются:
+    // в конфиг Xray — только уровень из списка.
+    let loglevel = if ["debug", "info", "warning", "error", "none"].contains(&s.log_level.as_str()) { s.log_level.as_str() } else { "warning" };
     let mut cfg = json!({
-        "log": { "loglevel": s.log_level },
+        "log": { "loglevel": loglevel },
         "inbounds": inbounds,
         "outbounds": outs,
         "routing": routing
