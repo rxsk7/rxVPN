@@ -9,6 +9,7 @@ import os
 import sys
 import zipfile
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # консоль Windows бывает cp1252
 src, out = sys.argv[1], sys.argv[2]
 base = os.path.dirname(os.path.abspath(src))
 tmp = out + ".tmp"

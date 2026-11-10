@@ -16,6 +16,18 @@ pub(crate) struct UpdateInfo {
 
 static FOUND: Mutex<Option<Manifest>> = Mutex::new(None);
 
+/// Найденное обновление — для плашки на главной: (версия, что нового).
+pub(crate) fn found() -> Option<UpdateBrief> {
+    FOUND.lock().unwrap().as_ref().map(|m| UpdateBrief { version: m.version.clone(), notes: m.notes.chars().take(300).collect() })
+}
+
+/// Есть версия новее (уже проверенная: подпись, хеш, версия) — коротко для главной.
+#[derive(Serialize, Clone)]
+pub(crate) struct UpdateBrief {
+    version: String,
+    notes: String,
+}
+
 fn info() -> UpdateInfo {
     let m = FOUND.lock().unwrap().clone();
     UpdateInfo {

@@ -30,6 +30,12 @@
       xray_version: "26.10.21", os: "Ubuntu 24.04", arch: "amd64", host_key: "SHA256:abc", key_fp: "SHA256:def", password_off: true, node_id: "b1",
       friends: [{ id: "aaaaaaaaaa", name: "Саша", enabled: true, limit_gb: 50, expires: Math.floor(Date.now() / 1000) + 86400 * 23 },
                 { id: "bbbbbbbbbb", name: "Дима", enabled: true, limit_gb: 10, expires: 0 }] }] : [], tor: null, wl_switched: false, health: [], hybrid_active: false, is_windows: true,
+    // ?shield=tun|proxy|bad — строка «что защищено»; ?upd=1 — плашка обновления.
+    shield: !on ? [] : ({
+      tun: [{ level: "ok", text: "Весь комп через VPN", hint: "" }, { level: "ok", text: "Kill switch включён", hint: "" }, { level: "ok", text: "DNS через VPN", hint: "" }],
+      bad: [{ level: "ok", text: "Весь комп через VPN", hint: "" }, { level: "bad", text: "Kill switch снят", hint: "" }, { level: "bad", text: "DNS идёт мимо VPN", hint: "" }],
+    })[q.get("shield")] || [{ level: "warn", text: "Через VPN — только браузер", hint: "" }],
+    update: q.get("upd") ? { version: "0.18.0", notes: "Состояние защиты на главной, kill switch переживает падение rxvpn" } : null,
   };
   const handlers = {};
   const log = [

@@ -230,6 +230,44 @@ struct ServerView {
     hidden: Option<filter::Hide>,
 }
 
+/// Один значок состояния защиты: ok — зелёный, warn — жёлтый, bad — красный.
+#[derive(Serialize)]
+struct ShieldItem {
+    level: &'static str,
+    text: String,
+    /// Подсказка при наведении: что это значит.
+    hint: String,
+}
+
+/// Что защищено прямо сейчас — честно, по состоянию программы, без догадок. Только пока
+/// VPN подключён: без него защищать нечего (про закрытый kill switch'ем интернет говорит
+/// сама главная).
+fn shield(s: &Settings, connected: bool, tun: bool, kill_on: bool, dns_leak: bool) -> Vec<ShieldItem> {
+    let mut v = Vec::new();
+    if !connected {
+        return v;
+    }
+    let mut add = |level: &'static str, text: &str, hint: &str| v.push(ShieldItem { level, text: text.into(), hint: hint.into() });
+    if tun {
+        add("ok", trs!("Весь комп через VPN"), trs!("Через VPN идут все программы, игры и службы Windows"));
+        if kill_on {
+            add("ok", trs!("Kill switch включён"), trs!("Упадёт VPN — программы не выйдут в интернет напрямую. Локальная сеть работает"));
+        } else if s.kill_switch {
+            add("bad", trs!("Kill switch снят"), trs!("Он включён в настройках, но сейчас не работает (например, вместе с «Через zapret, мимо VPN»). Упадёт VPN — трафик пойдёт напрямую"));
+        } else {
+            add("warn", trs!("Kill switch выключен"), trs!("Упадёт VPN — программы пойдут в интернет напрямую. Включается в настройках"));
+        }
+    } else {
+        add("warn", trs!("Через VPN — только браузер"), trs!("Режим «Браузер»: через VPN идут программы, которые слушаются системного прокси Windows. Игры и остальные программы — напрямую. Всё целиком — режим «Весь комп»"));
+    }
+    if dns_leak {
+        add("bad", trs!("DNS идёт мимо VPN"), trs!("Последняя проверка нашла утечку: провайдер видит имена сайтов. Открой «Мой IP и утечки»"));
+    } else if tun {
+        add("ok", trs!("DNS через VPN"), trs!("Имена сайтов узнаются внутри туннеля — провайдер их не видит"));
+    }
+    v
+}
+
 #[derive(Serialize, Default)]
 struct TgView {
     running: bool,
@@ -316,6 +354,10 @@ struct View {
     is_windows: bool,
     /// Kill switch включён: без VPN интернет закрыт (кроме локальной сети).
     kill_on: bool,
+    /// Что сейчас защищено — строка значков на главной (пусто — не подключено).
+    shield: Vec<ShieldItem>,
+    /// Есть версия новее (проверенная) — плашка на главной.
+    update: Option<updui::UpdateBrief>,
     /// Пауза: идёт ли и до какого unix-времени (None внутри — до включения вручную).
     paused: bool,
     pause_until: Option<i64>,
@@ -575,6 +617,8 @@ fn view(st: &AppState) -> View {
         zapret_testing: st.ztesting.load(Ordering::SeqCst),
         is_windows: cfg!(windows),
         kill_on: st.kill.lock().unwrap().is_some(),
+        shield: shield(&s.settings, connected, st.tun_active.load(Ordering::SeqCst), st.kill.lock().unwrap().is_some(), st.dns_leak.load(Ordering::SeqCst)),
+        update: updui::found(),
         paused: pauseui::current(st).is_some(),
         pause_until: pauseui::current(st).and_then(|p| p.until),
         tg,

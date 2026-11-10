@@ -93,6 +93,8 @@
         </div>
         <div class="power-label" id="power-label">Не подключено</div>
         <div class="hero-sub" id="hero-sub">Нажми кнопку, чтобы подключиться</div>
+        <!-- Что сейчас защищено: режим, kill switch, DNS. Пусто, пока не подключено -->
+        <div class="shield hidden" id="shield"></div>
         <button class="ghost small hidden" id="btn-kill-release" title="Снять блокировку kill switch и пустить интернет без VPN">Открыть интернет без VPN</button>
         <!-- Пауза: банк или Госуслуги не пускают с VPN — выключить на время, потом rxvpn включит сам -->
         <div class="chips pause-row hidden" id="pause-row" title="Выключить VPN на время — например, для банка или Госуслуг. Потом rxvpn включится сам">
@@ -101,6 +103,16 @@
           <button type="button" data-pause="60">1 час</button>
           <button type="button" data-pause="0">Пока не включу</button>
         </div>
+
+        <!-- Есть версия новее (подпись и хеш уже проверены) — ставится по нажатию -->
+        <button class="card-row upd-row hidden" id="btn-upd-home">
+          <span class="help-ico upd-ico" aria-hidden="true">↑</span>
+          <span class="cr-text">
+            <span class="cur-name" id="upd-home-name">Есть обновление</span>
+            <span class="cur-meta" id="upd-home-meta"></span>
+          </span>
+          <span class="chev">›</span>
+        </button>
 
         <button class="card-row" id="btn-current">
           <span class="cr-text">

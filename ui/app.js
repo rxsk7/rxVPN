@@ -2885,8 +2885,27 @@ $("btn-vm-forget").onclick = () => {
     vmDo("vps_uninstall", { id: v.id, onlyList: true }, t("Убран из списка"));
 };
 
+// ---------- защита и обновление на главной ----------
+function renderShield() {
+  const box = $("shield"), list = V.shield || [];
+  box.classList.toggle("hidden", !list.length);
+  box.replaceChildren(...list.map((x) => {
+    const s = el("span", "shield-item " + x.level, x.text);
+    s.title = x.hint;
+    return s;
+  }));
+  const u = V.update;
+  $("btn-upd-home").classList.toggle("hidden", !u);
+  if (u) {
+    $("upd-home-name").textContent = t("Есть rxvpn {version} — обновить", { version: u.version });
+    $("upd-home-meta").textContent = u.notes || t("Нажми — скачаю, проверю подпись и перезапущусь");
+  }
+}
+$("btn-upd-home").onclick = () => $("btn-upd-apply").onclick();
+
 // ---------- всё ли в порядке ----------
 function renderHealth() {
+  renderShield();
   const box = $("health"), btn = $("health-btn");
   const list = V.health || [];
   const top = list[0];
@@ -2930,7 +2949,11 @@ $("btn-upd-check").onclick = async () => {
 $("btn-upd-apply").onclick = async () => {
   if (!confirm(t("Скачать и поставить новую версию? rxvpn перезапустится сам."))) return;
   $("upd-state").textContent = t("Качаю и проверяю…");
-  try { await call("update_apply"); } catch (e) { $("upd-state").textContent = t("Не обновилось: ") + String(e); }
+  $("upd-home-meta").textContent = t("Качаю и проверяю…");
+  try { await call("update_apply"); } catch (e) {
+    $("upd-state").textContent = t("Не обновилось: ") + String(e);
+    $("upd-home-meta").textContent = t("Не обновилось: ") + String(e);
+  }
 };
 $("btn-settings").addEventListener("click", () => { call("update_check").then(showUpd).catch(() => {}); });
 
