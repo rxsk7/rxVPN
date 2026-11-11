@@ -891,6 +891,16 @@ function group(g, servers, best) {
       fb.classList.add("on");
       fb.textContent = t("Фильтр: ") + [...(f.countries || []), ...(f.words || [])].join(" ").slice(0, 24);
     }
+    const hb = btn("HWID", sub.hwid
+      ? t("Сервису отправляется номер этого rxvpn (HWID). Нажми, чтобы перестать")
+      : t("Сервис привязывает подписку к устройствам и просит HWID? Нажми — rxvpn будет отправлять ему случайный номер"), async () => {
+      const on = !sub.hwid;
+      if (on && !confirm(t("Отправлять сервису «{name}» номер этого rxvpn (HWID)?\n\nЭто случайный номер, придуманный для этой подписки, — не серийник компьютера. Сервис по нему считает устройства. Нужно, только если вместо серверов пришло «Включите отправку HWID».", { name: sub.name }))) return;
+      hb.disabled = true;
+      try { showImport(await call("set_sub_hwid", { id: sub.id, on })); await refresh(); }
+      finally { hb.disabled = false; }
+    }, "ghost small toggle");
+    if (sub.hwid) hb.classList.add("on");
     btn("✎", t("Переименовать подписку"), () =>
       openFolder({ sub: sub.id, value: sub.name, title: t("Переименовать подписку"),
         hint: t("Например, как называется VPN-сервис. Сервера подписки и так лежат в ней.") }), "ghost small icon");

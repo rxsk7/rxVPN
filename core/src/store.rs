@@ -26,6 +26,11 @@ pub struct Subscription {
     /// Фильтр (страны, слова). Живёт в подписке — обновление его не трогает.
     #[serde(default, skip_serializing_if = "crate::filter::SubFilter::is_empty")]
     pub filter: crate::filter::SubFilter,
+    /// Номер этого rxvpn для сервиса с привязкой подписки к устройствам (Remnawave и
+    /// похожие: заголовок `x-hwid`). Случайный, свой у каждой подписки — не серийник
+    /// компьютера. None — не отправляем (так по умолчанию).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hwid: Option<String>,
 }
 
 /// Остаток подписки из заголовка `subscription-userinfo`. Байты; 0 — без лимита.
@@ -382,6 +387,18 @@ impl Store {
         res
     }
 
+    /// Включить или выключить отправку HWID у подписки. Включили — номер придумывается
+    /// один раз; выключили — забывается (включишь снова — сервис увидит новое устройство).
+    pub fn set_sub_hwid(&mut self, id: &str, on: bool) -> Result<(), String> {
+        let sub = self.subscriptions.iter_mut().find(|s| s.id == id).ok_or(trs!("Подписки уже нет"))?;
+        if !on {
+            sub.hwid = None;
+        } else if sub.hwid.is_none() {
+            sub.hwid = Some(crate::vps::plan::uuid_v4());
+        }
+        Ok(())
+    }
+
     pub fn add_subscription(&mut self, name: &str, url: &str) -> String {
         let id = fnv64(url);
         if !self.subscriptions.iter().any(|s| s.id == id) {
@@ -401,6 +418,7 @@ impl Store {
                 updated_at: None,
                 usage: None,
                 filter: Default::default(),
+                hwid: None,
             });
         }
         id
@@ -688,6 +706,16 @@ mod tests {
         let z = st.servers.pop().unwrap();
         assert_eq!(z.address, "z.example");
         st.rename_subscription(&id, " Провайдер ").unwrap();
+        // HWID: по умолчанию нет; включили — появился и не меняется; выключили — забыт.
+        assert!(st.subscriptions[0].hwid.is_none());
+        st.set_sub_hwid(&id, true).unwrap();
+        let h = st.subscriptions[0].hwid.clone().unwrap();
+        assert_eq!(h.len(), 36);
+        st.set_sub_hwid(&id, true).unwrap();
+        assert_eq!(st.subscriptions[0].hwid.as_deref(), Some(h.as_str()));
+        st.set_sub_hwid(&id, false).unwrap();
+        assert!(st.subscriptions[0].hwid.is_none());
+        assert!(st.set_sub_hwid("нет-такой", true).is_err());
         assert_eq!(st.subscriptions[0].name, "Провайдер");
         // Бэкап с кривым: папка у сервера подписки — убираем; невидимые символы
         // выкидываем, длинное обрезаем (а не теряем имя целиком).

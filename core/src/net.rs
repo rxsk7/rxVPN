@@ -245,12 +245,15 @@ const MAX_CORE_ZIP: usize = 200 << 20;
 const CORE_FILES: &[&str] = &["xray", "xray.exe", "geoip.dat", "geosite.dat", "LICENSE", "README.md"];
 
 pub async fn fetch_subscription(url: &str, socks_port: Option<u16>) -> Result<String, String> {
-    fetch_subscription_full(url, socks_port).await.map(|f| f.0)
+    fetch_subscription_full(url, socks_port, None).await.map(|f| f.0)
 }
 
 /// Подписка + остаток трафика и срок из заголовка `subscription-userinfo`
 /// (Marzban, Remnawave, 3x-ui, Hiddify): `upload=…; download=…; total=…; expire=…`.
-pub async fn fetch_subscription_full(url: &str, socks_port: Option<u16>) -> Result<(String, Option<crate::store::SubUsage>), String> {
+///
+/// `hwid` — номер устройства для сервисов с привязкой подписки к устройствам (Remnawave:
+/// `x-hwid`; без него такой сервис отдаёт «сервер»-записку «включите HWID» или 404).
+pub async fn fetch_subscription_full(url: &str, socks_port: Option<u16>, hwid: Option<&str>) -> Result<(String, Option<crate::store::SubUsage>), String> {
     // Редирект с https на http не принимаем: на открытом участке подписку
     // мог бы подменить провайдер.
     let policy = reqwest::redirect::Policy::custom(|a| match redirect_verdict(a.previous(), a.url()) {
@@ -269,11 +272,11 @@ pub async fn fetch_subscription_full(url: &str, socks_port: Option<u16>) -> Resu
         );
     }
     let client = b.build().map_err(|e| e.to_string())?;
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| tr!("не скачалась: {e}"))?;
+    let mut req = client.get(url);
+    if let Some(h) = hwid {
+        req = req.header("x-hwid", h).header("x-device-os", "Windows").header("x-device-model", "rxvpn");
+    }
+    let resp = req.send().await.map_err(|e| tr!("не скачалась: {e}"))?;
     if !resp.status().is_success() {
         return Err(tr!("сервер ответил {}", resp.status()));
     }
@@ -416,6 +419,31 @@ mod tests {
         assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
 
+    /// HWID уходит только когда включён у подписки.
+    #[tokio::test(flavor = "current_thread")]
+    async fn hwid_header_only_when_asked() {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            for mut s in l.incoming().flatten() {
+                let mut b = [0u8; 2048];
+                let n = s.read(&mut b).unwrap_or(0);
+                let _ = tx.send(String::from_utf8_lossy(&b[..n]).to_lowercase());
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+            }
+        });
+        let url = format!("http://127.0.0.1:{port}/s");
+        fetch_subscription_full(&url, None, None).await.unwrap();
+        let plain = rx.recv().unwrap();
+        assert!(!plain.contains("x-hwid") && !plain.contains("x-device"), "без галочки — ни слова об устройстве");
+        fetch_subscription_full(&url, None, Some("11111111-2222-4333-8444-555555555555")).await.unwrap();
+        let with = rx.recv().unwrap();
+        assert!(with.contains("x-hwid: 11111111-2222-4333-8444-555555555555"));
+        assert!(with.contains("x-device-os: windows"));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn subscription_refuses_https_to_http_redirect() {
         use std::io::{Read, Write};
@@ -436,7 +464,7 @@ mod tests {
             }
         });
         assert_eq!(fetch_subscription(&format!("http://127.0.0.1:{port}/a"), None).await.unwrap(), "ok");
-        let (_, usage) = fetch_subscription_full(&format!("http://127.0.0.1:{port}/a"), None).await.unwrap();
+        let (_, usage) = fetch_subscription_full(&format!("http://127.0.0.1:{port}/a"), None, None).await.unwrap();
         assert_eq!(usage, Some(crate::store::SubUsage { upload: 1, download: 2, total: 30, expire: 1767225600 }));
         let u = |s: &str| url::Url::parse(s).unwrap();
         assert!(redirect_verdict(&[u("https://a.com/s")], &u("http://b.com/s")).is_err(), "https → http нельзя");

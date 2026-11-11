@@ -3561,17 +3561,17 @@ fn merge(into: &mut ImportResult, r: ImportResult) {
 }
 
 async fn refresh_sub(app: &AppHandle, st: &AppState, sub_id: &str) -> ImportResult {
-    let (url, name, socks) = {
+    let (url, name, socks, hwid) = {
         let s = st.store.lock().unwrap();
         let Some(sub) = s.subscriptions.iter().find(|x| x.id == sub_id) else {
             return ImportResult::default();
         };
-        (sub.url.clone(), sub.name.clone(), s.settings.socks_port)
+        (sub.url.clone(), sub.name.clone(), s.settings.socks_port, sub.hwid.clone())
     };
     // Если VPN уже работает — качаем подписку через него.
     let _ = socks;
     let via = probe_proxy(st);
-    match net::fetch_subscription_full(&url, via).await {
+    match net::fetch_subscription_full(&url, via, hwid.as_deref()).await {
         Ok((body, usage)) => {
             // Панель перестала присылать остаток — убираем старый, иначе
             // «подписка закончилась» висело бы и после продления.
@@ -3582,8 +3582,15 @@ async fn refresh_sub(app: &AppHandle, st: &AppState, sub_id: &str) -> ImportResu
             let (nodes, errors) = tauri::async_runtime::spawn_blocking(move || rxvpn_core::store::parse_subscription(&body))
                 .await
                 .unwrap_or_default();
-            let r = st.store.lock().unwrap().apply_parsed(sub_id, nodes, errors, now());
+            let mut r = st.store.lock().unwrap().apply_parsed(sub_id, nodes, errors, now());
             persist(st);
+            // Сервис с привязкой к устройствам вместо серверов прислал «сервер»-записку
+            // «включите отправку HWID» — говорим человеку, где это включается.
+            let wants_hwid = hwid.is_none()
+                && st.store.lock().unwrap().servers.iter().any(|n| n.sub_id.as_deref() == Some(sub_id) && n.name.to_lowercase().contains("hwid"));
+            if wants_hwid {
+                r.errors.push(tr!("подписка «{name}»: сервис просит номер устройства (HWID) и без него серверы не отдаёт. Включается кнопкой «HWID» у подписки"));
+            }
             let hid = {
                 let s = st.store.lock().unwrap();
                 let f = s.subscriptions.iter().find(|x| x.id == sub_id).map(|x| x.filter.clone()).unwrap_or_default();
@@ -3632,6 +3639,15 @@ async fn import_text(app: AppHandle, st: State<'_, AppState>, text: String) -> R
         merge(&mut total, r);
     }
     Ok(total)
+}
+
+/// Отправлять ли сервису номер устройства (HWID) при загрузке подписки; сразу обновляет её.
+#[tauri::command]
+async fn set_sub_hwid(app: AppHandle, st: State<'_, AppState>, id: String, on: bool) -> Res<ImportResult> {
+    st.store.lock().unwrap().set_sub_hwid(&id, on)?;
+    persist(&st);
+    log(&app, if on { trs!("подписка: отправка HWID включена") } else { trs!("подписка: отправка HWID выключена") });
+    Ok(refresh_sub(&app, &st, &id).await)
 }
 
 /// Фильтр подписки: страны и слова, как их ввёл человек.
@@ -5667,6 +5683,7 @@ pub fn run() {
             delete_server,
             import_text,
             update_subscription,
+            set_sub_hwid,
             update_all_subscriptions,
             delete_subscription,
             rename_subscription,

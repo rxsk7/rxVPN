@@ -626,6 +626,7 @@ mod tests {
             updated_at: None,
             usage: None,
             filter: Default::default(),
+            hwid: None,
         });
         s.settings.tg_secret = "0123456789abcdef0123456789abcdef".into();
         s.warp.push(crate::warp::Warp {

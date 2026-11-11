@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn big_list_is_fast() {
         let mut s = Store::default();
-        let sub = |id: &str| Subscription { id: id.into(), name: id.into(), url: format!("https://{id}"), updated_at: None, usage: None, filter: parse("NL, DE, FI", "-test premium x y z").unwrap() };
+        let sub = |id: &str| Subscription { id: id.into(), name: id.into(), url: format!("https://{id}"), updated_at: None, usage: None, hwid: None, filter: parse("NL, DE, FI", "-test premium x y z").unwrap() };
         s.subscriptions = (0..4).map(|i| sub(&format!("s{i}"))).collect();
         for i in 0..12_000 {
             let mut n = node(&format!("n{i}"), "", &format!("h{}.example", i % 6000), "11111111-1111-1111-1111-111111111111", Some(&format!("s{}", i % 4)));
@@ -516,7 +516,7 @@ mod tests {
 
     fn store() -> Store {
         let mut s = Store::default();
-        let sub = |id: &str| Subscription { id: id.into(), name: id.into(), url: format!("https://{id}"), updated_at: None, usage: None, filter: SubFilter::default() };
+        let sub = |id: &str| Subscription { id: id.into(), name: id.into(), url: format!("https://{id}"), updated_at: None, usage: None, hwid: None, filter: SubFilter::default() };
         s.subscriptions = vec![sub("a"), sub("b")];
         let u1 = "11111111-1111-1111-1111-111111111111";
         let u2 = "22222222-2222-2222-2222-222222222222";
