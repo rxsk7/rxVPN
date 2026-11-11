@@ -49,7 +49,10 @@ class H(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
 
-socketserver.TCPServer.allow_reuse_address = True
-with socketserver.TCPServer(("127.0.0.1", PORT), H) as s:
+# По потоку на соединение: браузер открывает соединения про запас и молчит в них —
+# однопоточный сервер на таком зависал и не отвечал вообще.
+socketserver.ThreadingTCPServer.allow_reuse_address = True
+socketserver.ThreadingTCPServer.daemon_threads = True
+with socketserver.ThreadingTCPServer(("127.0.0.1", PORT), H) as s:
     print(f"rxvpn preview: http://localhost:{PORT}/?state=off", flush=True)
     s.serve_forever()

@@ -157,6 +157,12 @@ details.home-log:not([open]) summary button { display: none; }
 .wel-step.done .wel-num { background: var(--green); color: #fff; font-size: 0; }
 .wel-step.done .wel-num::before { content: "✓"; font-size: 14px; }
 .wel-step.done button { display: none; }
+.wel-step.done #wel-done { display: inline-flex; }
+.wel-step.busy .wel-num { background: none; box-shadow: inset 0 0 0 2px var(--line); border-top-color: var(--accent); font-size: 0;
+  border: 2px solid var(--line); border-top: 2px solid var(--accent); animation: wel-spin .8s linear infinite; }
+.wel-step.fail .wel-num { background: var(--red); color: #fff; font-size: 0; }
+.wel-step.fail .wel-num::before { content: "!"; font-size: 14px; }
+@keyframes wel-spin { to { transform: rotate(360deg); } }
 .wel-step.wel-dim { opacity: .5; }
 .wel-btns { display: flex; gap: 6px; flex: none; }
 .wel-alt { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }

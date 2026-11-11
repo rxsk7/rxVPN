@@ -64,15 +64,21 @@
           </li>
           <li class="wel-step" id="wel-step-add">
             <span class="wel-num">2</span>
-            <span class="cr-text"><b>Добавь сервер</b><span class="nav-meta">ссылка vless:// и другие или подписка от VPN-сервиса</span></span>
+            <span class="cr-text"><b>Добавь сервер</b><span class="nav-meta" id="wel-add-meta">ссылка vless:// и другие или подписка от VPN-сервиса</span></span>
             <span class="wel-btns">
               <button class="primary small" id="wel-paste">Вставить из буфера</button>
               <button class="ghost small" id="wel-type">Ввести</button>
             </span>
           </li>
-          <li class="wel-step wel-dim">
+          <!-- Третий шаг rxvpn делает сам: проверяет серверы, выбирает быстрый, подключается -->
+          <li class="wel-step wel-dim" id="wel-step-go">
             <span class="wel-num">3</span>
-            <span class="cr-text"><b>Подключись</b><span class="nav-meta">одна большая кнопка на главной</span></span>
+            <span class="cr-text"><b>Подключись</b><span class="nav-meta" id="wel-go-meta">сам проверю серверы и подключусь к самому быстрому</span></span>
+            <span class="wel-btns">
+              <button class="primary small hidden" id="wel-retry">Ещё раз</button>
+              <button class="primary small hidden" id="wel-done">Готово</button>
+              <button class="ghost small hidden" id="wel-skip">На главную</button>
+            </span>
           </li>
         </ol>
         <div class="wel-alt">

@@ -407,13 +407,72 @@ $("btn-kill-release").onclick = async () => {
 };
 
 // ---------- первый запуск ----------
+// Мастер: после первой ссылки rxvpn сам докачивает ядро, проверяет серверы, выбирает быстрый
+// и подключается. wiz — его шаг (null — мастер не идёт); wizPending — ссылку добавляют с
+// экрана приветствия, после импорта мастер продолжит сам.
+let wiz = null, wizPending = false;
+const WIZ_TEXT = {
+  core: tk("качаю ядро Xray, ~30 МБ…"),
+  check: tk("проверяю, какие серверы отвечают…"),
+  connect: tk("подключаюсь к самому быстрому…"),
+};
 function renderWelcome() {
   const empty = !V.servers.length && !V.settings.zapret;
-  $("welcome").classList.toggle("hidden", !empty);
-  document.querySelector('.page[data-page="home"]').classList.toggle("is-empty", empty);
+  const show = empty || !!wiz;
+  $("welcome").classList.toggle("hidden", !show);
+  document.querySelector('.page[data-page="home"]').classList.toggle("is-empty", show);
   $("wel-step-core").classList.toggle("done", !!V.core_installed);
+  $("wel-step-core").classList.toggle("busy", wiz?.stage === "core");
   $("wel-core-meta").textContent = V.core_installed ? t("скачано") : t("движок VPN, ~30 МБ с GitHub");
+  const n = V.servers.length;
+  $("wel-step-add").classList.toggle("done", n > 0);
+  $("wel-add-meta").textContent = n ? t("серверов: {n}", { n }) : t("ссылка vless:// и другие или подписка от VPN-сервиса");
+  const go = $("wel-step-go"), stage = wiz?.stage;
+  go.classList.toggle("wel-dim", !wiz);
+  go.classList.toggle("busy", stage === "check" || stage === "connect");
+  go.classList.toggle("done", stage === "done");
+  go.classList.toggle("fail", stage === "fail");
+  $("wel-go-meta").textContent = stage === "done" ? t("подключено: {name}", { name: V.active_name || "" })
+    : stage === "fail" ? wiz.msg
+    : WIZ_TEXT[stage] ? t(WIZ_TEXT[stage])
+    : t("сам проверю серверы и подключусь к самому быстрому");
+  $("wel-retry").classList.toggle("hidden", stage !== "fail");
+  $("wel-skip").classList.toggle("hidden", stage !== "fail");
+  $("wel-done").classList.toggle("hidden", stage !== "done");
+  document.querySelector(".wel-alt").classList.toggle("hidden", n > 0); // сервер уже есть — обходные пути не нужны
 }
+async function runWizard() {
+  if (wiz && wiz.stage !== "fail") return;
+  wiz = { stage: "check" };
+  render();
+  try {
+    if (!V.core_installed) {
+      wiz.stage = "core";
+      render();
+      V = await call("download_core");
+      wiz.stage = "check";
+      render();
+    }
+    await runTest();
+    const id = bestId();
+    if (!id) {
+      wiz = { stage: "fail", msg: t("Ни один сервер не ответил. Проверь интернет или возьми другую ссылку") };
+      return render();
+    }
+    wiz.stage = "connect";
+    render();
+    V = await call("select_server", { id });
+    if (!V.connected) V = await call("connect");
+    wiz = V.connected ? { stage: "done" } : { stage: "fail", msg: t("Не подключилось — причина в логе") };
+  } catch (e) {
+    // Нужны права администратора — про это уже открылось своё окно; мастер уступает ему.
+    wiz = String(e) === "NEED_ADMIN" ? null : { stage: "fail", msg: String(e) };
+    V = await invoke("get_view").catch(() => V);
+  }
+  render();
+}
+$("wel-retry").onclick = runWizard;
+$("wel-done").onclick = $("wel-skip").onclick = () => { wiz = null; render(); };
 $("wel-core").onclick = (e) => downloadCore(e.currentTarget);
 $("wel-paste").onclick = async (e) => {
   const b = e.currentTarget;
@@ -421,12 +480,14 @@ $("wel-paste").onclick = async (e) => {
   try {
     const text = await call("read_clipboard");
     if (!text || !text.trim()) return toast(t("В буфере пусто — скопируй ссылку на сервер или подписку"), true);
+    wizPending = true;
     await importText(text);
   } finally {
+    wizPending = false;
     b.disabled = false;
   }
 };
-$("wel-type").onclick = () => { showPage("servers"); $("import-text").focus(); };
+$("wel-type").onclick = () => { wizPending = true; showPage("servers"); $("import-text").focus(); };
 $("wel-vps").onclick = () => $("btn-vps-new").click();
 $("wel-zapret").onclick = () => document.querySelector('#seg-mode button[data-mode="zapret"]').click();
 
@@ -1294,6 +1355,12 @@ async function importText(text) {
     showImport(await call("import_text", { text }));
     $("import-text").value = "";
     await refresh();
+    // Первая ссылка с экрана приветствия — дальше мастер всё делает сам.
+    if (wizPending && V.servers.length && !V.settings.zapret) {
+      wizPending = false;
+      showPage("home");
+      runWizard(); // не ждём: кнопки импорта освобождаются сразу
+    }
   } finally {
     $("btn-add").disabled = $("btn-paste").disabled = false;
   }

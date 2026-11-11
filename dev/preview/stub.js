@@ -51,6 +51,12 @@
     pause_vpn: ({ minutes }) => { view.connected = false; view.paused = true; view.pause_until = minutes ? Math.floor(Date.now() / 1000) + minutes * 60 : null; return view; },
     vps_traffic: () => ({ by: { owner: [1e9, 9e9, false], aaaaaaaaaa: [2.1e9, 17.3e9, false], bbbbbbbbbb: [1.2e9, 9.6e9, true] } }),
     app_traffic: () => { const k = (Date.now() / 1000) % 1e4; return [["firefox.exe", 2.1e6, 48e6 + k * 9e4], ["Telegram.exe", 0.9e6, 12e6], ["steam.exe", 0.2e6, 3.4e6], ["svchost.exe", 0.1e6, 0.4e6]].map(([name, up, down]) => ({ name, up, down })); },
+    // Мастер первого запуска (?state=empty → «Вставить из буфера»); ?wiz=dead — серверы не отвечают.
+    read_clipboard: () => "vless://example",
+    import_text: () => { view.servers = [srv("a1", "🇳🇱 Нидерланды", "VLESS · Reality · nl1.example.com", null, null, null, null), srv("a2", "🇩🇪 Германия", "VLESS · xHTTP · de.example.com", null, null, null, null)]; view.selected = "a1"; return { added: 2, updated: 0, errors: [] }; },
+    download_core: () => new Promise((r) => setTimeout(() => { view.core_installed = true; r(view); }, 2000)),
+    test_all: () => new Promise((r) => setTimeout(() => r(view.servers.map((s, i) => ({ id: s.id, ms: q.get("wiz") === "dead" ? null : 48 + i * 30 }))), 2000)),
+    select_server: ({ id }) => { view.selected = id; view.active_name = view.servers.find((s) => s.id === id)?.name; return view; },
     update_check: () => ({ configured: true, current: "0.12.0", version: null, notes: null }),
   };
   window.__TAURI__ = {
