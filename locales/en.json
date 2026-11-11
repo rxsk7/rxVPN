@@ -1048,6 +1048,7 @@
  "подписка не найдена": "subscription not found",
  "подписка перенаправила с https на http — отказываюсь": "the subscription redirected from https to http — refusing",
  "подписка похожа на JSON, но он битый: {e}": "the subscription looks like JSON, but it is broken: {e}",
+ "подписка с HWID перенаправляет на другой сайт — номер устройства туда не отправляю": "the HWID subscription redirects to another site — the device ID is not sent there",
  "подписка: отправка HWID включена": "subscription: HWID sending enabled",
  "подписка: отправка HWID выключена": "subscription: HWID sending disabled",
  "подпись обновления испорчена": "the update signature is corrupt",

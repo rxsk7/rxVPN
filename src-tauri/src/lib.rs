@@ -572,6 +572,13 @@ fn view(st: &AppState) -> View {
         closed_rules: site_routes(&s.settings, &s.servers).iter().filter(|r| r.node.is_none()).count(),
         dns_stuck,
     });
+    // Замок kill берём один раз и отпускаем до сборки View: временные значения внутри
+    // литерала структуры живут до его конца, второй lock() там же — взаимная блокировка
+    // (окно навсегда застывало пустым: get_view не отвечал).
+    let kill_on = st.kill.lock().unwrap().is_some();
+    let tun_now = st.tun_active.load(Ordering::SeqCst);
+    let dns_leak = st.dns_leak.load(Ordering::SeqCst);
+    let paused = pauseui::current(st);
     View {
         health,
         servers: s
@@ -616,11 +623,11 @@ fn view(st: &AppState) -> View {
         zapret_name,
         zapret_testing: st.ztesting.load(Ordering::SeqCst),
         is_windows: cfg!(windows),
-        kill_on: st.kill.lock().unwrap().is_some(),
-        shield: shield(&s.settings, connected, st.tun_active.load(Ordering::SeqCst), st.kill.lock().unwrap().is_some(), st.dns_leak.load(Ordering::SeqCst)),
+        kill_on,
+        shield: shield(&s.settings, connected, tun_now, kill_on, dns_leak),
         update: updui::found(),
-        paused: pauseui::current(st).is_some(),
-        pause_until: pauseui::current(st).and_then(|p| p.until),
+        paused: paused.is_some(),
+        pause_until: paused.and_then(|p| p.until),
         tg,
         doh,
         vps: vpsui::views(&s),

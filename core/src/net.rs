@@ -256,9 +256,18 @@ pub async fn fetch_subscription(url: &str, socks_port: Option<u16>) -> Result<St
 pub async fn fetch_subscription_full(url: &str, socks_port: Option<u16>, hwid: Option<&str>) -> Result<(String, Option<crate::store::SubUsage>), String> {
     // Редирект с https на http не принимаем: на открытом участке подписку
     // мог бы подменить провайдер.
-    let policy = reqwest::redirect::Policy::custom(|a| match redirect_verdict(a.previous(), a.url()) {
-        Ok(()) => a.follow(),
-        Err(e) => a.error(e),
+    // С HWID — ещё и не уходим на другой сайт: номер устройства предназначен только тому
+    // сервису, чей адрес человек вставил сам (reqwest повторил бы заголовок и там).
+    let pinned = hwid.is_some();
+    let policy = reqwest::redirect::Policy::custom(move |a| {
+        let other_site = pinned && a.previous().first().map(|u| u.host_str()) != Some(a.url().host_str());
+        if other_site {
+            return a.error(trs!("подписка с HWID перенаправляет на другой сайт — номер устройства туда не отправляю"));
+        }
+        match redirect_verdict(a.previous(), a.url()) {
+            Ok(()) => a.follow(),
+            Err(e) => a.error(e),
+        }
     });
     let mut b = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -442,6 +451,39 @@ mod tests {
         let with = rx.recv().unwrap();
         assert!(with.contains("x-hwid: 11111111-2222-4333-8444-555555555555"));
         assert!(with.contains("x-device-os: windows"));
+    }
+
+    /// С HWID перенаправление на другой сайт не принимаем: номер устройства туда не уходит.
+    #[tokio::test(flavor = "current_thread")]
+    async fn hwid_does_not_follow_to_another_site() {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut s in l.incoming().flatten() {
+                let mut b = [0u8; 2048];
+                let n = s.read(&mut b).unwrap_or(0);
+                let req = String::from_utf8_lossy(&b[..n]).to_string();
+                if req.starts_with("GET /a") {
+                    // localhost и 127.0.0.1 — для проверки это «разные сайты».
+                    let _ = write!(s, "HTTP/1.1 302 Found
+Location: http://localhost:{port}/b
+Content-Length: 0
+Connection: close
+
+");
+                } else {
+                    let _ = write!(s, "HTTP/1.1 200 OK
+Content-Length: 2
+Connection: close
+
+ok");
+                }
+            }
+        });
+        let url = format!("http://127.0.0.1:{port}/a");
+        assert!(fetch_subscription_full(&url, None, Some("id")).await.is_err(), "с HWID на другой сайт не идём");
+        assert!(fetch_subscription_full(&url, None, None).await.is_ok(), "без HWID — как раньше");
     }
 
     #[tokio::test(flavor = "current_thread")]
