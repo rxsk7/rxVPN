@@ -56,8 +56,10 @@ def toml_version(path):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
     flags = sys.argv[1:]
+    # Значение после --prev — не «что нового».
+    skip = {flags.index("--prev") + 1} if "--prev" in flags else set()
+    args = [a for i, a in enumerate(flags) if not a.startswith("--") and i not in skip]
     if len(args) != 1 or not args[0].strip():
         die('нужна строка «что нового»: python dev/release.py "…"')
     notes = args[0].strip()
