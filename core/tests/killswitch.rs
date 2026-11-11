@@ -8,7 +8,9 @@
 //!
 //! Если на компе уже работает VPN в режиме TUN, задай RXVPN_TEST_LOCAL_IP (адрес настоящей
 //! сетевой карты) и RXVPN_TEST_IFACE (её имя): тест пойдёт мимо чужого туннеля.
-//! Сессия WFP динамическая: упади тест посередине — фильтры уберёт Windows.
+//!
+//! ТОЛЬКО В ВИРТУАЛЬНОЙ МАШИНЕ. Фильтры переживают смерть процесса: упади тест посередине —
+//! интернет останется закрытым до перезагрузки (или до `cargo test ... clear_leftover`).
 
 #![cfg(windows)]
 
@@ -17,7 +19,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use rxvpn_core::killswitch::{interface_luid, KillSwitch};
+use rxvpn_core::killswitch::{clear, interface_luid, leftover, KillSwitch};
 
 const TARGET: ([u8; 4], u16) = ([104, 16, 132, 229], 8080);
 
@@ -85,4 +87,34 @@ fn interface_permit_lets_traffic_through() {
     assert!(curl_ok());
     drop(ks);
     assert!(interface_luid("rxvpn-нет-такого").is_none());
+}
+
+/// Главное в 0.18: rxvpn умер, не сняв kill switch (здесь — забыли объект, Drop не вызван) —
+/// интернет остаётся закрытым. Следующий «запуск» видит блокировку и может её перенять
+/// (enable — без окна «открыто») или снять (clear).
+#[test]
+#[ignore]
+fn survives_death_and_is_cleared_by_next_start() {
+    assert!(curl_ok(), "до kill switch интернет должен быть");
+    let me = std::env::current_exe().unwrap();
+    std::mem::forget(KillSwitch::enable(&[me.as_path()]).expect("kill switch"));
+    assert!(leftover(), "блокировка осталась без хозяина");
+    assert!(!curl_ok(), "и держит интернет закрытым");
+    // Перенять: новый объект поверх старых фильтров.
+    let ks = KillSwitch::enable(&[me.as_path()]).expect("перенять блокировку");
+    assert!(!curl_ok(), "после перехвата всё ещё закрыто");
+    assert!(self_ok(), "разрешённая программа выходит");
+    std::mem::forget(ks);
+    // Снять, как «Открыть интернет без VPN» после запуска.
+    clear().expect("снять блокировку");
+    assert!(!leftover());
+    assert!(curl_ok(), "сеть вернулась");
+}
+
+/// Спасательный круг: снять блокировку, если тест выше упал посередине.
+#[test]
+#[ignore]
+fn clear_leftover() {
+    clear().expect("снять блокировку");
+    assert!(!leftover());
 }

@@ -431,7 +431,8 @@
       <label class="check"><input type="checkbox" name="kill_switch" /> Kill switch в режиме «Весь комп»</label>
       <p class="hint">Упал VPN — интернет закрывается, пока не подключишься снова: ни одна программа не уйдёт в сеть
         с твоим настоящим IP. Локальная сеть (принтер, роутер) работает. Не работает вместе с «Через zapret, мимо VPN».
-        Закрыл rxvpn — блокировка снимается сама.</p>
+        Вышел из rxvpn — блокировка снимается. Упал сам rxvpn или его сняли в диспетчере задач — интернет остаётся
+        закрытым: запусти rxvpn снова или перезагрузи компьютер.</p>
       <label>Горячая клавиша «Подключить / Отключить»<input type="text" name="hotkey" placeholder="Ctrl+Alt+V" maxlength="40" spellcheck="false" /></label>
       <p class="hint">Работает, даже когда окно свёрнуто. Пусто — выключена.</p>
       <label>Подключаться, когда запускаются программы<textarea name="connect_apps" rows="2" spellcheck="false" placeholder="Discord.exe&#10;cs2.exe"></textarea></label>

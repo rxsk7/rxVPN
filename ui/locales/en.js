@@ -708,7 +708,7 @@ window.RX_EN = {
  "Удалить подписку «{name}» и все её сервера?": "Delete subscription “{name}” and all its servers?",
  "Удалить с сервера": "Remove from server",
  "Узнаю…": "Checking…",
- "Упал VPN — интернет закрывается, пока не подключишься снова: ни одна программа не уйдёт в сеть с твоим настоящим IP. Локальная сеть (принтер, роутер) работает. Не работает вместе с «Через zapret, мимо VPN». Закрыл rxvpn — блокировка снимается сама.": "If the VPN drops, the internet closes until you reconnect: no program goes online with your real IP. The local network (printer, router) keeps working. Doesn't work together with “Through zapret, bypassing VPN”. Close rxvpn and the block lifts by itself.",
+ "Упал VPN — интернет закрывается, пока не подключишься снова: ни одна программа не уйдёт в сеть с твоим настоящим IP. Локальная сеть (принтер, роутер) работает. Не работает вместе с «Через zapret, мимо VPN». Вышел из rxvpn — блокировка снимается. Упал сам rxvpn или его сняли в диспетчере задач — интернет остаётся закрытым: запусти rxvpn снова или перезагрузи компьютер.": "If the VPN drops, the internet closes until you reconnect: no program goes online with your real IP. The local network (printer, router) keeps working. Doesn't work together with “Through zapret, bypassing VPN”. Quit rxvpn and the block lifts. If rxvpn itself crashes or is killed in Task Manager, the internet stays closed: start rxvpn again or restart the computer.",
  "Уровень лога": "Log level",
  "Установить": "Install",
  "Установлено": "Installed",

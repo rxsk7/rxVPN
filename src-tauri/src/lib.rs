@@ -749,6 +749,46 @@ fn kill_off(app: &AppHandle, st: &AppState, why: &str) {
     }
 }
 
+/// Прошлый rxvpn умер с включённым kill switch (упал, сняли в диспетчере задач) — блокировка
+/// осталась и держит интернет закрытым. Перенимаем её: на главной появляется «интернет
+/// закрыт» и кнопка «Открыть интернет без VPN», подключение работает как обычно. Kill switch
+/// с тех пор выключили в настройках или перенять не вышло — снимаем.
+fn kill_adopt(app: &AppHandle) {
+    if !rxvpn_core::killswitch::leftover() {
+        return;
+    }
+    let st = app.state::<AppState>();
+    if !winsys::is_admin() {
+        notify(app, trs!("rxvpn: интернет закрыт"), trs!("Прошлый rxvpn закрылся с ошибкой, kill switch держит интернет закрытым. Запусти rxvpn от администратора или перезагрузи компьютер."));
+        return;
+    }
+    let want = {
+        let s = st.store.lock().unwrap();
+        s.settings.tun && s.settings.kill_switch && !s.settings.zapret_hybrid
+    };
+    let adopted = want && {
+        let xray = runner::xray_path(&st.paths.core);
+        match std::env::current_exe().map_err(|e| e.to_string()).and_then(|me| rxvpn_core::killswitch::KillSwitch::enable(&[xray.as_path(), me.as_path()])) {
+            Ok(ks) => {
+                *st.kill.lock().unwrap() = Some(ks);
+                true
+            }
+            Err(e) => {
+                log(app, tr!("kill switch: блокировку прошлого запуска перенять не вышло ({e}) — снимаю"));
+                false
+            }
+        }
+    };
+    if adopted {
+        notify(app, trs!("rxvpn: интернет закрыт"), trs!("Прошлый rxvpn закрылся с ошибкой, kill switch не пустил трафик мимо VPN. Подключись снова или сними блокировку в окне."));
+        return;
+    }
+    match rxvpn_core::killswitch::clear() {
+        Ok(()) => log(app, trs!("kill switch: снята блокировка, оставшаяся от прошлого запуска")),
+        Err(e) => notify(app, trs!("rxvpn: интернет закрыт"), e),
+    }
+}
+
 /// Включить kill switch после запуска Xray в TUN (или оставить включённым при перезапуске
 /// «Авто») и пустить через него новый адаптер туннеля, как только тот появится.
 /// С гибридом «Через zapret, мимо VPN» не включается: WinDivert отправляет пакеты заново,
@@ -5539,6 +5579,7 @@ pub fn run() {
                 log(app.handle(), trs!("автозапуск: rxvpn запустился без прав администратора из старого ключа автозапуска — прав не прошу. \
                      Перезапусти rxvpn от администратора (Ещё → Настройки → «Сохранить»): автозапуск станет задачей планировщика, без окна UAC при входе"));
             }
+            kill_adopt(app.handle());
             if connect_now || auto_connect {
                 connect_in_background(app.handle().clone(), true, from_autostart);
             }
@@ -5704,6 +5745,9 @@ pub fn run() {
                 stop_core(st.inner());
                 stop_zapret(st.inner());
                 st.zcancel.store(true, Ordering::SeqCst);
+                // Выход — не падение: блокировку снимаем сами (фильтры kill switch переживают
+                // процесс, а Drop состояния при выходе может и не вызваться).
+                st.kill.lock().unwrap().take();
             }
         });
 }
