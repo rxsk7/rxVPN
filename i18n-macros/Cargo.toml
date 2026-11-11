@@ -1,6 +1,6 @@
 [package]
 name = "rxvpn-i18n-macros"
-version = "0.17.2"
+version = "0.18.0"
 edition = "2021"
 description = "Переводы rxvpn при компиляции: английский текст подставляется из locales/en.json"
 
