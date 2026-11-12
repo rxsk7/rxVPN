@@ -223,6 +223,7 @@ function render() {
   // Сервисы и обход — про VPN-сервер; в «Без VPN» их не показываем.
   $("ht-svc").classList.toggle("hidden", zMode);
   $("ht-tweak").classList.toggle("hidden", zMode);
+  $("tool-group-server").classList.toggle("hidden", zMode);
 
   const real = (arr) => arr.filter((l) => l.trim() && !l.trim().startsWith("#")).length;
   const nd = real(V.settings.direct), np = real(V.settings.proxy);

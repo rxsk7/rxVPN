@@ -772,6 +772,7 @@ window.RX_EN = {
  "Это мой сервер": "This is my server",
  "Это моя сеть": "This is my network",
  "Это нужно делать с правами администратора, а портативная версия их не получает: её папку может переписать любая программа, и вирус получил бы права вместе с rxvpn. Установи rxvpn установщиком (он ставит в Program Files) — там это работает.": "This needs administrator rights, and the portable version does not get them: any program can rewrite its folder, and a virus would get the rights along with rxvpn. Install rxvpn with the installer (it puts it into Program Files) — it works there.",
+ "Этот сервер": "This server",
  "Ядро Xray": "Xray core",
  "Ядро Xray ещё не скачано — без него подключиться нельзя.": "The Xray core isn't downloaded yet — you can't connect without it.",
  "Ядро Xray установлено": "Xray core installed",

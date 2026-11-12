@@ -35,7 +35,8 @@
       tun: [{ level: "ok", text: "Весь комп через VPN", hint: "" }, { level: "ok", text: "Kill switch включён", hint: "" }, { level: "ok", text: "DNS через VPN", hint: "" }],
       bad: [{ level: "ok", text: "Весь комп через VPN", hint: "" }, { level: "bad", text: "Kill switch снят", hint: "" }, { level: "bad", text: "DNS идёт мимо VPN", hint: "" }],
     })[q.get("shield")] || [{ level: "warn", text: "Через VPN — только браузер", hint: "" }],
-    update: q.get("upd") ? { version: "0.18.0", notes: "Состояние защиты на главной, kill switch переживает падение rxvpn" } : null,
+    // ?upd=1 — короткое «что нового», ?upd=long — длинное, как в настоящем манифесте (до 300 знаков).
+    update: q.get("upd") ? { version: "0.18.0", notes: q.get("upd") === "long" ? "Серверы из подписок с маскировкой sudoku и header-custom теперь подключаются (после обновления нажми «Обновить подписки»). На главной кнопка «Обновления» — проверить новую версию сейчас; сам rxvpn проверяет её каждые 3 часа." : "Состояние защиты на главной, kill switch переживает падение rxvpn" } : null,
   };
   const handlers = {};
   const log = [

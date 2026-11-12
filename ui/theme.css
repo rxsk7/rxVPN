@@ -59,6 +59,10 @@ body { flex-direction: row; }
 .home-main #health { grid-area: health; }
 .home-main #pause-row { grid-area: pause; justify-content: flex-start; margin: 0; }
 .home-main #btn-help { grid-area: help; margin-top: 0; }
+/* Плашка обновления — отдельной строкой на всю ширину. Без этого сетка ставила её в колонку
+   горы («auto»), и длинное «что нового» в одну строку растягивало колонку на весь экран. */
+.home-main #btn-upd-home { grid-column: 1 / -1; min-width: 0; margin-top: 8px; }
+.upd-row .cur-meta { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .home-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
 .home-side .speed, .home-side .tg-home, .home-side .home-tools { grid-column: 1 / -1; }
 @media (max-width: 820px) {
@@ -126,7 +130,13 @@ body { flex-direction: row; }
 .home-side .mode-block { background: var(--card); box-shadow: var(--card-shadow); border-radius: var(--radius); padding: 10px; gap: 6px; }
 .home-side .mode-hint { font-size: 12px; }
 .home-side .tg-home { border-radius: var(--radius); }
-.home-side .home-tools { justify-content: flex-start; margin: 0; }
+/* Кнопки-помощники внизу главной — по смыслу, тремя подписанными группами в одной карточке. */
+.home-side .home-tools {
+  display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px 26px; margin: 0; padding: 12px 14px;
+  background: var(--card); box-shadow: var(--card-shadow); border-radius: var(--radius);
+}
+.tool-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tool-cap { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 
 /* лог — свёрнут */
 details.home-log {

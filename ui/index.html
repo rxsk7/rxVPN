@@ -186,13 +186,28 @@
           <input type="checkbox" id="chk-tg-home" aria-label="Telegram без VPN" title="Telegram Desktop — через веб-вход, без VPN" />
         </div>
 
-        <div class="chips home-tools" id="home-tools">
-          <button type="button" id="ht-diag" title="Что провайдер сделал с сайтом и что включить">Сайт не открывается?</button>
-          <button type="button" id="ht-ip" title="С какого IP тебя видят сайты, утечки DNS и IPv6">Мой IP и утечки</button>
-          <button type="button" id="ht-speed" title="Скорость через VPN (Cloudflare)">Скорость</button>
-          <button type="button" id="ht-svc" title="Страна сервера и работают ли ChatGPT, Gemini, YouTube Premium, Netflix">Сервисы</button>
-          <button type="button" id="ht-tweak" title="Сервер не подключается? Подберу обход блокировки">Обход</button>
-          <button type="button" id="ht-upd" title="Проверить, не вышла ли новая версия rxvpn">Обновления</button>
+        <div class="home-tools" id="home-tools">
+          <div class="tool-group">
+            <span class="tool-cap">Проверить</span>
+            <div class="chips">
+              <button type="button" id="ht-diag" title="Что провайдер сделал с сайтом и что включить">Сайт не открывается?</button>
+              <button type="button" id="ht-ip" title="С какого IP тебя видят сайты, утечки DNS и IPv6">Мой IP и утечки</button>
+              <button type="button" id="ht-speed" title="Скорость через VPN (Cloudflare)">Скорость</button>
+            </div>
+          </div>
+          <div class="tool-group" id="tool-group-server">
+            <span class="tool-cap">Этот сервер</span>
+            <div class="chips">
+              <button type="button" id="ht-svc" title="Страна сервера и работают ли ChatGPT, Gemini, YouTube Premium, Netflix">Сервисы</button>
+              <button type="button" id="ht-tweak" title="Сервер не подключается? Подберу обход блокировки">Обход</button>
+            </div>
+          </div>
+          <div class="tool-group">
+            <span class="tool-cap">rxvpn</span>
+            <div class="chips">
+              <button type="button" id="ht-upd" title="Проверить, не вышла ли новая версия rxvpn">Обновления</button>
+            </div>
+          </div>
         </div>
        </div>
       </div>
