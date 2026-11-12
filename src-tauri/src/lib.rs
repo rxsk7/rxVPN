@@ -94,6 +94,8 @@ impl RunInfo {
 
 struct AppState {
     paths: Paths,
+    /// Автопроверка выпуска (`--smoke`, dev/release.py): см. `smoke_ready`.
+    smoke: bool,
     /// «Пауза» (pauseui.rs): VPN выключен на время, потом включится сам.
     pause: Mutex<Option<pauseui::Pause>>,
     pause_gen: AtomicU64,
@@ -249,11 +251,18 @@ fn shield(s: &Settings, connected: bool, tun: bool, kill_on: bool, dns_leak: boo
     }
     let mut add = |level: &'static str, text: &str, hint: &str| v.push(ShieldItem { level, text: text.into(), hint: hint.into() });
     if tun {
-        add("ok", trs!("Весь комп через VPN"), trs!("Через VPN идут все программы, игры и службы Windows"));
-        if kill_on {
+        // Что именно идёт через VPN, решает маршрут: «Весь комп» — это про программы, а не про сайты.
+        match s.route {
+            RouteMode::Global => add("ok", trs!("Весь комп через VPN"), trs!("Маршрут «Всё»: через VPN идут все программы, игры и службы Windows, на любые сайты")),
+            RouteMode::BypassRu => add("ok", trs!("Весь комп через VPN, кроме РФ"), trs!("Маршрут «Обход РФ»: все программы, игры и службы Windows идут через VPN, а российские сайты — напрямую, с твоим IP")),
+            RouteMode::Blocked => add("warn", trs!("Через VPN — только заблокированное"), trs!("Маршрут «Только блок.»: через VPN идут только сайты, заблокированные в РФ, — из любых программ. Всё остальное — напрямую, с твоим IP")),
+        }
+        if kill_on && s.zapret_hybrid {
+            add("ok", trs!("Kill switch включён"), trs!("Упадёт VPN — программы не выйдут в интернет напрямую. Сайты «мимо VPN» идут через zapret, как и раньше. Локальная сеть работает"));
+        } else if kill_on {
             add("ok", trs!("Kill switch включён"), trs!("Упадёт VPN — программы не выйдут в интернет напрямую. Локальная сеть работает"));
         } else if s.kill_switch {
-            add("bad", trs!("Kill switch снят"), trs!("Он включён в настройках, но сейчас не работает (например, вместе с «Через zapret, мимо VPN»). Упадёт VPN — трафик пойдёт напрямую"));
+            add("bad", trs!("Kill switch снят"), trs!("Он включён в настройках, но сейчас не работает. Упадёт VPN — трафик пойдёт напрямую"));
         } else {
             add("warn", trs!("Kill switch выключен"), trs!("Упадёт VPN — программы пойдут в интернет напрямую. Включается в настройках"));
         }
@@ -771,7 +780,7 @@ fn kill_adopt(app: &AppHandle) {
     }
     let want = {
         let s = st.store.lock().unwrap();
-        s.settings.tun && s.settings.kill_switch && !s.settings.zapret_hybrid
+        s.settings.tun && s.settings.kill_switch
     };
     let adopted = want && {
         let xray = runner::xray_path(&st.paths.core);
@@ -796,16 +805,43 @@ fn kill_adopt(app: &AppHandle) {
     }
 }
 
+/// Гибрид «Через zapret, мимо VPN» при kill switch. Сайты гибрида Xray шлёт напрямую, winws
+/// перехватывает эти пакеты на сетевой карте и отправляет заново — уже от имени ядра Windows
+/// («System»), и без разрешения kill switch их режет. Разрешаем узко: «System», та же карта,
+/// только порты стратегии. Гибрид не работает (или winws умер) — разрешение снимается.
+/// Зовётся после всего, что меняет kill switch, гибрид или winws.
+fn kill_reinject_sync(app: &AppHandle, st: &AppState) {
+    // По одному замку за раз.
+    let iface = st.hybrid.lock().unwrap().as_ref().and_then(|h| h.iface);
+    let wf = st.zapret.lock().unwrap().as_ref().map(|z| z.wf.clone());
+    let want = match (iface, wf) {
+        (Some(i), Some(Some(wf))) => winsys::iface_alias(i)
+            .and_then(|a| rxvpn_core::killswitch::interface_luid(&a))
+            .map(|luid| (rxvpn_core::killswitch::Reinject { luid, tcp: wf.tcp, udp: wf.udp }, wf.raw)),
+        (Some(_), Some(None)) => {
+            log(app, trs!("kill switch: порты стратегии zapret не разобраны — сайты «мимо VPN» при kill switch закрыты"));
+            None
+        }
+        _ => None,
+    };
+    let r = st.kill.lock().unwrap().as_mut().map(|k| k.allow_reinject(want.as_ref().map(|(r, _)| r)));
+    match (r, want) {
+        (Some(Err(e)), _) => log(app, tr!("kill switch: пакеты zapret не пропущены ({e}) — сайты «мимо VPN» закрыты")),
+        (Some(Ok(())), Some((_, raw))) => {
+            log(app, trs!("kill switch: сайты «мимо VPN» идут через zapret, остальное без VPN закрыто"));
+            if raw {
+                log(app, trs!("kill switch: стратегия zapret перехватывает не только по портам (--wf-raw-part) — эта часть при kill switch не пройдёт"));
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Включить kill switch после запуска Xray в TUN (или оставить включённым при перезапуске
 /// «Авто») и пустить через него новый адаптер туннеля, как только тот появится.
-/// С гибридом «Через zapret, мимо VPN» не включается: WinDivert отправляет пакеты заново,
-/// Windows проверяет их уже без имени программы — kill switch отрезал бы и сам Xray.
-fn kill_arm(app: &AppHandle, st: &AppState, gen: u64, hybrid: bool) {
-    if hybrid {
-        kill_off(app, st, trs!("он не работает вместе с «Через zapret, мимо VPN»"));
-        log(app, trs!("kill switch не включён: он не работает вместе с «Через zapret, мимо VPN» — выключи одно из двух"));
-        return;
-    }
+/// С гибридом «Через zapret, мимо VPN» — плюс узкое разрешение для пакетов, которые winws
+/// отправил заново (`kill_reinject_sync`).
+fn kill_arm(app: &AppHandle, st: &AppState, gen: u64) {
     {
         let mut k = st.kill.lock().unwrap();
         if k.is_none() {
@@ -828,6 +864,7 @@ fn kill_arm(app: &AppHandle, st: &AppState, gen: u64, hybrid: bool) {
             }
         }
     }
+    kill_reinject_sync(app, st);
     // Адаптер туннеля Xray создаёт сам — ждём его и пускаем через kill switch.
     let a = app.clone();
     std::thread::spawn(move || {
@@ -1178,7 +1215,7 @@ fn start_core_ex(app: &AppHandle, st: &AppState, allow_tun: bool, how: HybridSta
 
     spawn_monitor(app.clone(), info.clone());
     if settings.tun && settings.kill_switch {
-        kill_arm(app, st, my_gen, settings.zapret_hybrid);
+        kill_arm(app, st, my_gen);
     } else {
         kill_off(app, st, trs!("режим без kill switch"));
     }
@@ -1729,6 +1766,8 @@ struct ZapretRun {
     proc: runner::EngineProcess,
     _lock: zapret::EngineLock,
     name: String,
+    /// Порты, которые перехватывает winws, — для kill switch в гибриде. None — не разобрались.
+    wf: Option<zapret::WfPorts>,
 }
 
 /// Имя стратегии, если zapret работает.
@@ -1755,6 +1794,10 @@ fn stop_zapret(st: &AppState) {
         z.proc.stop();
     }
     *st.hybrid.lock().unwrap() = None;
+    // winws больше нет — пропускать его пакеты через kill switch незачем.
+    if let Some(k) = st.kill.lock().unwrap().as_mut() {
+        let _ = k.allow_reinject(None);
+    }
 }
 
 fn zengine(st: &AppState) -> PathBuf {
@@ -1909,6 +1952,7 @@ fn launch_winws(
     mine.extend(c.hybrid_hosts.iter().cloned());
     zapret::add_user_hosts(run, &mine);
     let (_ver, lock) = zapret::engine_lock(engine)?;
+    let wf = zapret::wf_ports(&args);
     let app_line = app.clone();
     // Текущая папка — рабочая: пути к спискам в аргументах относительные.
     let proc = runner::EngineProcess::start(
@@ -1919,7 +1963,7 @@ fn launch_winws(
         move |line| emit_log(&app_line, format!("[zapret] {line}")),
         on_exit,
     )?;
-    Ok(ZapretRun { proc, _lock: lock, name: s.name.clone() })
+    Ok(ZapretRun { proc, _lock: lock, name: s.name.clone(), wf })
 }
 
 /// Включить zapret с выбранной стратегией (VPN при этом выключается).
@@ -2067,6 +2111,7 @@ fn start_hybrid_with(app: &AppHandle, st: &AppState, h: zapret::Hybrid) -> Res<(
             let dead = st.zapret.lock().unwrap().take();
             if dead.is_some() {
                 drop(dead);
+                kill_reinject_sync(&a, &st);
                 notify(&a, trs!("Zapret остановился"), trs!("Сайты «мимо VPN» идут без обхода — переподключись, причина в логе"));
                 changed(&a);
             }
@@ -2086,6 +2131,7 @@ fn start_hybrid_with(app: &AppHandle, st: &AppState, h: zapret::Hybrid) -> Res<(
         return Err(trs!("winws завершился сразу после запуска — смотри лог").into());
     }
     *st.hybrid.lock().unwrap() = Some(h.clone());
+    kill_reinject_sync(app, st);
     log(
         app,
         tr!("гибрид: zapret «{}» для сайтов «мимо VPN»{}, VPN-серверов в исключениях: {}",
@@ -4737,7 +4783,7 @@ async fn save_settings(app: AppHandle, st: State<'_, AppState>, settings: Settin
             trs!("шифрование state.json выключено")
         });
     }
-    let kill_wanted = settings.tun && settings.kill_switch && !settings.zapret_hybrid;
+    let kill_wanted = settings.tun && settings.kill_switch;
     st.store.lock().unwrap().settings = settings;
     persist(&st);
     if !kill_wanted {
@@ -4810,6 +4856,20 @@ async fn relaunch_admin(app: AppHandle, st: State<'_, AppState>, then: Option<St
     stop_zapret(&st);
     app.exit(0);
     Ok(())
+}
+
+/// Окно получило ответ `get_view` и нарисовало главную. В обычном запуске — ничего.
+/// В автопроверке выпуска (`--smoke`) — отметка в своей временной папке данных и выход:
+/// dev/release.py ждёт её и без неё не пакует и не подписывает (0.18.0 вышла с окном,
+/// которое не дождалось `get_view`).
+#[tauri::command]
+fn smoke_ready(st: State<'_, AppState>, keys: u32, welcome: bool) {
+    if !st.smoke {
+        return;
+    }
+    let body = format!("{{\"version\":\"{}\",\"keys\":{keys},\"welcome\":{welcome}}}", env!("CARGO_PKG_VERSION"));
+    let _ = std::fs::write(st.paths.data.join("smoke.json"), body);
+    std::process::exit(0);
 }
 
 #[tauri::command]
@@ -5291,6 +5351,15 @@ pub fn run() {
     let mut connect_now = has("--connect");
     let relaunched = has("--relaunched");
     let zapret_test_now = has("--zapret-test");
+    // Автопроверка выпуска (dev/release.py): собранный exe запускается рядом с работающей
+    // rxvpn на пустой папке данных, окно зовёт настоящий get_view, рисует главную и
+    // сообщает об этом (`smoke_ready`) — программа пишет отметку и выходит. В этом режиме
+    // rxvpn не трогает ничего за пределами своей папки: ни замок второго запуска, ни реестр,
+    // ни системный прокси, ни kill switch, ни сеть. С правами администратора не работает.
+    let smoke = has("--smoke");
+    if smoke && winsys::is_admin() {
+        return;
+    }
 
     // От администратора окно (WebView2) не должно слушаться переменных окружения
     // пользователя: их может поменять любая программа (HKCU\Environment), а
@@ -5308,12 +5377,13 @@ pub fn run() {
 
     // Вторая копия не нужна: просим первую показать окно и выходим.
     let test_alone = test_bad_webview();
-    let Some(_instance) = winsys::acquire_instance(relaunched).or_else(|| test_alone.then(winsys::InstanceGuard::dummy)) else {
+    let instance = if smoke { Some(winsys::InstanceGuard::dummy()) } else { winsys::acquire_instance(relaunched).or_else(|| test_alone.then(winsys::InstanceGuard::dummy)) };
+    let Some(_instance) = instance else {
         handoff_to_running(if from_autostart { "noop" } else { "show" });
         return;
     };
     // Порт — только канал «покажи окно» для следующих запусков.
-    let lock = TcpListener::bind(("127.0.0.1", LOCK_PORT)).ok();
+    let lock = if smoke { None } else { TcpListener::bind(("127.0.0.1", LOCK_PORT)).ok() };
 
     // Установленная версия хранит данные в %LOCALAPPDATA%\dev.rxmv.rxvpn
     // (отдельно от программы: переустановка их не трогает).
@@ -5339,9 +5409,14 @@ pub fn run() {
     let portable_base = if protected { data_arg.clone() } else { Some(app_dir.join("data")).filter(|d| d.is_dir()) };
     let portable = portable_base.is_some();
     let base = portable_base.unwrap_or_else(|| installed_base.clone());
+    // Автопроверка — только на своей пустой папке data рядом с exe: к настоящим серверам
+    // и настройкам вторая копия без замка не подходит.
+    if smoke && (!portable || protected || base.join("state.json").exists()) {
+        return;
+    }
 
     // Первый запуск портативной после установленной — переносим сервера и настройки.
-    if portable && !protected && !base.join("state.json").exists() {
+    if portable && !protected && !smoke && !base.join("state.json").exists() {
         let old = installed_base.join("state.json");
         if old.exists() {
             let _ = std::fs::copy(&old, base.join("state.json"));
@@ -5428,9 +5503,11 @@ pub fn run() {
             Err(e) => elevate_refused = Some(e),
         }
     }
-    notify::init(&paths.data, APP_ICON);
-    // Прошлый запуск мог упасть и оставить системный прокси на наш порт.
-    sysproxy::cleanup_stale(&format!("127.0.0.1:{}", store.settings.http_port));
+    if !smoke {
+        notify::init(&paths.data, APP_ICON);
+        // Прошлый запуск мог упасть и оставить системный прокси на наш порт.
+        sysproxy::cleanup_stale(&format!("127.0.0.1:{}", store.settings.http_port));
+    }
     // …и системный DNS на наш DoH: вернёт spawn_doh_watch (нет прав — подскажет «Всё ли в порядке»).
     let sysdns_pending_at_start = rxvpn_core::sysdns::pending(&paths.data);
     // Паника — вернуть DNS Windows до того, как процесс умрёт.
@@ -5445,6 +5522,7 @@ pub fn run() {
 
     let state = AppState {
         paths,
+        smoke,
         store: Mutex::new(store),
         proc: Mutex::new(None),
         gen: AtomicU64::new(0),
@@ -5585,6 +5663,11 @@ pub fn run() {
 
             #[cfg(debug_assertions)]
             debug_tray_hook(app.handle().clone());
+            if smoke {
+                // Автопроверка: окно есть, дальше — только то, что оно само попросит.
+                // Ни трея, ни автозапуска, ни kill switch, ни фоновых задач с сетью.
+                return Ok(());
+            }
             if let Err(e) = setup_tray(app) {
                 eprintln!("трей не создан: {e}"); // i18n-skip: только для отладки
             }
@@ -5723,6 +5806,7 @@ pub fn run() {
             save_settings,
             relaunch_admin,
             take_startup_action,
+            smoke_ready,
             zapret_get,
             zapret_pick_folder,
             zapret_select,

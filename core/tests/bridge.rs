@@ -55,11 +55,32 @@ fn bridge_chain_live() {
     let exit_proc = start(&ex_cfg);
     let _bridge = start(&br_cfg);
     let _cli = start(&cli_cfg);
-    std::thread::sleep(Duration::from_millis(1200));
+    // Холодный старт: три Xray поднимаются не за фиксированное время (антивирус, диск).
+    // Ждём, пока каждый начнёт слушать свой порт, а не «1,2 секунды и надеемся».
+    for (what, port) in [("выходной", ex_port), ("мост", br_port), ("клиент", socks)] {
+        let up = (0..150).any(|_| {
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() || {
+                std::thread::sleep(Duration::from_millis(100));
+                false
+            }
+        });
+        assert!(up, "{what}: порт {port} не начал слушать за 15+ секунд; лог: {:?}", logs.lock().unwrap());
+    }
 
     let c = reqwest::Client::builder().proxy(reqwest::Proxy::all(format!("socks5h://127.0.0.1:{socks}")).unwrap()).timeout(Duration::from_secs(20)).build().unwrap();
     let get = || rt.block_on(async { c.get("http://cp.cloudflare.com/generate_204").send().await.map(|r| r.status().as_u16()) });
-    let ok = get();
+    // Первый запрос на холодную может не успеть (Reality-рукопожатия двух звеньев, DNS выходного):
+    // до пяти попыток. Проверку «без выходного наружу не идёт» ниже это не ослабляет.
+    let mut ok = get();
+    for _ in 0..4 {
+        if matches!(ok, Ok(204)) {
+            break;
+        }
+        eprintln!("клиент → мост → выход: {ok:?} — ещё попытка");
+        std::thread::sleep(Duration::from_secs(1));
+        ok = get();
+    }
     eprintln!("клиент → мост → выход: {ok:?}");
     assert_eq!(ok.unwrap(), 204, "цепочка возит трафик");
     let local = rt.block_on(async { c.get(format!("http://127.0.0.1:{ex_port}/")).send().await.map(|r| r.status().as_u16()) });

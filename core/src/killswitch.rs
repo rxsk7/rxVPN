@@ -16,6 +16,15 @@
 //! переживают, так что навсегда без интернета не остаться. У каждого фильтра свой заранее
 //! известный ключ (`filter_key`): чужой процесс rxvpn находит и убирает их без списка id.
 //! Нужны права администратора (как и TUN).
+//!
+//! Гибрид «Через zapret, мимо VPN». Сайты гибрида Xray отправляет напрямую — он разрешён по
+//! программе. Но winws (драйвер WinDivert) перехватывает эти пакеты на сетевой карте и
+//! отправляет заново из ядра, и Windows проверяет их на ALE_AUTH_CONNECT ещё раз — уже как
+//! программу «System» (проверено пробой `examples/ks_probe.rs`: без разрешения не проходит даже
+//! SYN). Для них — отдельное узкое разрешение `allow_reinject`: программа «System» **и** та
+//! самая сетевая карта **и** только порты, которые перехватывает стратегия winws. Обычная
+//! программа под него не попадает: её соединение отсекается по её же имени раньше, чем
+//! появится пакет, который WinDivert мог бы перехватить.
 
 use std::path::{Path, PathBuf};
 
@@ -44,9 +53,34 @@ pub const W_TUN: u8 = 14;
 pub const W_DNS_BLOCK: u8 = 13;
 pub const W_LAN: u8 = 12;
 
-/// Сколько ключей фильтров отведено: 0..KEY_TUN — постоянные, KEY_TUN и KEY_TUN+1 — туннель.
+/// Сколько ключей фильтров отведено: 0..KEY_REINJECT — постоянные, дальше четыре —
+/// пакеты zapret (TCP/UDP × v4/v6), KEY_TUN и KEY_TUN+1 — туннель.
 pub const KEYS: u32 = 64;
+pub const KEY_REINJECT: u32 = 48;
 pub const KEY_TUN: u32 = 56;
+/// Больше диапазонов портов в одном разрешении не берём (у стратегий Flowseal их до десятка).
+pub const PORT_RANGES_MAX: usize = 32;
+
+/// Что пропускать для гибрида: пакеты, которые winws перехватил и отправил заново.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reinject {
+    /// LUID настоящей сетевой карты (той же, что в `--wf-iface` у winws).
+    pub luid: u64,
+    /// Диапазоны удалённых портов из `--wf-tcp` / `--wf-udp` стратегии.
+    pub tcp: Vec<(u16, u16)>,
+    pub udp: Vec<(u16, u16)>,
+}
+
+impl Reinject {
+    fn check(&self) -> Result<(), String> {
+        for list in [&self.tcp, &self.udp] {
+            if list.len() > PORT_RANGES_MAX || list.iter().any(|(lo, hi)| *lo == 0 || lo > hi) {
+                return Err(trs!("kill switch: порты стратегии zapret не разобраны").into());
+            }
+        }
+        Ok(())
+    }
+}
 
 /// Осталась ли блокировка от прошлого rxvpn (он умер, не сняв kill switch).
 /// Не вышло спросить Windows — считаем, что нет.
@@ -116,6 +150,23 @@ impl KillSwitch {
         #[cfg(not(windows))]
         {
             let _ = luid;
+            Err(trs!("kill switch есть только в Windows").into())
+        }
+    }
+
+    /// Пропустить (Some) или перестать пропускать (None) пакеты, которые winws гибрида
+    /// отправил заново. Прошлое такое разрешение снимается той же транзакцией.
+    /// Ошибка — разрешения нет вовсе: сайты гибрида закрыты, мимо ничего не идёт.
+    pub fn allow_reinject(&mut self, r: Option<&Reinject>) -> Result<(), String> {
+        if let Some(r) = r {
+            r.check()?;
+        }
+        #[cfg(windows)]
+        {
+            self.inner.allow_reinject(r)
+        }
+        #[cfg(not(windows))]
+        {
             Err(trs!("kill switch есть только в Windows").into())
         }
     }
@@ -242,6 +293,17 @@ mod imp {
         V4(Box<FWP_V4_ADDR_AND_MASK>),
         V6(Box<FWP_V6_ADDR_AND_MASK>),
         Blob(*mut FWP_BYTE_BLOB),
+        /// Диапазон портов (условия с одним полем WFP складывает через «или»).
+        Ports(Box<FWP_RANGE0>),
+    }
+
+    fn ports(lo: u16, hi: u16) -> Val {
+        let mut r: FWP_RANGE0 = unsafe { std::mem::zeroed() };
+        r.valueLow.r#type = FWP_UINT16;
+        r.valueLow.Anonymous.uint16 = lo;
+        r.valueHigh.r#type = FWP_UINT16;
+        r.valueHigh.Anonymous.uint16 = hi;
+        Val::Ports(Box::new(r))
     }
 
     struct Cond {
@@ -282,6 +344,10 @@ mod imp {
                     v.r#type = FWP_BYTE_BLOB_TYPE;
                     v.Anonymous.byteBlob = *b;
                 }
+                Val::Ports(r) => {
+                    v.r#type = FWP_RANGE_TYPE;
+                    v.Anonymous.rangeValue = &mut **r;
+                }
             }
             FWPM_FILTER_CONDITION0 { fieldKey: self.field, matchType: self.mt, conditionValue: v }
         }
@@ -318,7 +384,7 @@ mod imp {
         }
 
         fn key(&mut self) -> Result<u32, String> {
-            if self.next >= super::KEY_TUN {
+            if self.next >= super::KEY_REINJECT {
                 return Err(trs!("kill switch: слишком много фильтров").into());
             }
             self.next += 1;
@@ -452,6 +518,46 @@ mod imp {
         }
     }
 
+    impl Engine {
+        pub(super) fn allow_reinject(&mut self, r: Option<&super::Reinject>) -> Result<(), String> {
+            check(trs!("транзакция"), unsafe { FwpmTransactionBegin0(self.h, 0) })?;
+            // Так Windows называет ядро в ALE_APP_ID: строка «System» с нулём на конце.
+            let mut sys = wide("System");
+            let mut blob = FWP_BYTE_BLOB { size: (sys.len() * 2) as u32, data: sys.as_mut_ptr() as *mut u8 };
+            let res = (|| {
+                for i in 0..4 {
+                    unsafe { FwpmFilterDeleteByKey0(self.h, &filter_key(super::KEY_REINJECT + i)) };
+                }
+                let Some(r) = r else { return Ok(()) };
+                let mut key = super::KEY_REINJECT;
+                for layer in [FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6] {
+                    for (proto, list) in [(6u8, &r.tcp), (17, &r.udp)] {
+                        key += 1;
+                        if list.is_empty() {
+                            continue;
+                        }
+                        let mut conds = vec![
+                            Cond { field: FWPM_CONDITION_ALE_APP_ID, mt: FWP_MATCH_EQUAL, val: Val::Blob(&mut blob) },
+                            Cond { field: FWPM_CONDITION_IP_LOCAL_INTERFACE, mt: FWP_MATCH_EQUAL, val: Val::U64(Box::new(r.luid)) },
+                            Cond { field: FWPM_CONDITION_IP_PROTOCOL, mt: FWP_MATCH_EQUAL, val: Val::U8(proto) },
+                        ];
+                        conds.extend(list.iter().map(|(lo, hi)| Cond { field: FWPM_CONDITION_IP_REMOTE_PORT, mt: FWP_MATCH_RANGE, val: ports(*lo, *hi) }));
+                        // Вес как у локальной сети — ниже блока DNS: порт 53 не пройдёт и тут.
+                        self.add(key - 1, layer, W_LAN, FWP_ACTION_PERMIT, &mut conds)?;
+                    }
+                }
+                Ok(())
+            })();
+            match res {
+                Ok(()) => check(trs!("применение фильтров"), unsafe { FwpmTransactionCommit0(self.h) }),
+                Err(e) => {
+                    unsafe { FwpmTransactionAbort0(self.h) };
+                    Err(e)
+                }
+            }
+        }
+    }
+
     impl Drop for Engine {
         fn drop(&mut self) {
             // Фильтры статические — сами не уйдут: снимаем явно. Не снялись (быть не должно) —
@@ -496,8 +602,19 @@ mod tests {
     #[test]
     fn filter_keys_fit() {
         // Постоянных фильтров — по 7 + число программ на слой; программ две (Xray, rxvpn).
-        assert!(2 * (7 + 2) <= KEY_TUN, "постоянные фильтры не залезают на ключи туннеля");
+        assert!(2 * (7 + 2) <= KEY_REINJECT, "постоянные фильтры не залезают на ключи zapret");
+        assert!(KEY_REINJECT + 4 <= KEY_TUN, "четыре ключа zapret не залезают на ключи туннеля");
         assert!(KEY_TUN + 2 <= KEYS, "оба ключа туннеля попадают под уборку");
+    }
+
+    #[test]
+    fn reinject_is_narrow() {
+        assert!(W_DNS_BLOCK > W_LAN, "разрешение для пакетов zapret (вес W_LAN) не открывает DNS");
+        let ok = Reinject { luid: 1, tcp: vec![(80, 80), (443, 443)], udp: vec![(50000, 50100)] };
+        assert!(ok.check().is_ok());
+        assert!(Reinject { tcp: vec![(0, 80)], ..ok.clone() }.check().is_err(), "порт 0");
+        assert!(Reinject { udp: vec![(500, 400)], ..ok.clone() }.check().is_err(), "перевёрнутый диапазон");
+        assert!(Reinject { tcp: vec![(1, 1); PORT_RANGES_MAX + 1], ..ok }.check().is_err(), "слишком много");
     }
 
     #[test]

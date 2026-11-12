@@ -1165,6 +1165,43 @@ pub fn prepare_hybrid(root: &Path, s: &Strategy, run: &Path, h: &Hybrid) -> Resu
     Ok(out)
 }
 
+/// Какие порты перехватывает winws (`--wf-tcp`, `--wf-udp` готовых аргументов запуска) —
+/// только для них kill switch пропускает пакеты, отправленные заново (см. killswitch.rs).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WfPorts {
+    pub tcp: Vec<(u16, u16)>,
+    pub udp: Vec<(u16, u16)>,
+    /// Есть `--wf-raw-part`: стратегия перехватывает что-то ещё, чего по портам не описать.
+    /// Kill switch это не пропустит — такие пакеты при нём не уйдут.
+    pub raw: bool,
+}
+
+/// None — порты не разобрались (тогда разрешения не будет вовсе).
+pub fn wf_ports(args: &[OsString]) -> Option<WfPorts> {
+    fn list(v: &str) -> Option<Vec<(u16, u16)>> {
+        v.split(',')
+            .filter(|p| !p.trim().is_empty())
+            .map(|p| {
+                let (lo, hi) = p.trim().split_once('-').unwrap_or((p.trim(), p.trim()));
+                let (lo, hi): (u16, u16) = (lo.parse().ok()?, hi.parse().ok()?);
+                (lo != 0 && lo <= hi).then_some((lo, hi))
+            })
+            .collect()
+    }
+    let mut w = WfPorts::default();
+    for a in args {
+        let a = a.to_string_lossy();
+        if let Some(v) = a.strip_prefix("--wf-tcp=") {
+            w.tcp.extend(list(v)?);
+        } else if let Some(v) = a.strip_prefix("--wf-udp=") {
+            w.udp.extend(list(v)?);
+        } else if a.starts_with("--wf-raw-part") {
+            w.raw = true;
+        }
+    }
+    Some(w)
+}
+
 /// Что проверяем в фоне: работает ли ещё стратегия (YouTube и Discord) и есть
 /// ли вообще интернет (ya.ru не блокируют — не открылся, значит, сеть упала).
 pub const HEALTH_TARGETS: &[(&str, &str)] = &[
@@ -1391,6 +1428,25 @@ pub fn best(scores: &[Score]) -> Option<&Score> {
             Some(b) if !s.better(b) => Some(b),
             _ => Some(s),
         })
+}
+
+#[cfg(test)]
+mod wf_tests {
+    use super::*;
+
+    #[test]
+    fn wf_ports_from_args() {
+        let a = |v: &[&str]| v.iter().map(OsString::from).collect::<Vec<_>>();
+        let w = wf_ports(&a(&["--wf-iface=9", "--wf-tcp=80,443,2053,12", "--wf-udp=443,19294-19344,50000-50100,12", "--filter-tcp=1-65535"])).unwrap();
+        assert_eq!(w.tcp, [(80, 80), (443, 443), (2053, 2053), (12, 12)]);
+        assert_eq!(w.udp, [(443, 443), (19294, 19344), (50000, 50100), (12, 12)]);
+        assert!(!w.raw, "--filter-* — не перехват, а профиль внутри winws");
+        assert!(wf_ports(&a(&["--wf-raw-part=@files/x.txt"])).unwrap().raw);
+        assert_eq!(wf_ports(&a(&[])).unwrap(), WfPorts::default());
+        for bad in ["--wf-tcp=0", "--wf-tcp=500-400", "--wf-udp=70000", "--wf-tcp=http", "--wf-tcp=1-2-3"] {
+            assert!(wf_ports(&a(&[bad])).is_none(), "{bad}");
+        }
+    }
 }
 
 #[cfg(test)]

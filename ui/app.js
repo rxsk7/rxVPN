@@ -2301,6 +2301,9 @@ listen("core-exit", async (e) => {
 });
 
 refresh().then(async () => {
+  // Настоящее окно получило get_view и нарисовало главную — отметка для автопроверки
+  // выпуска (dev/release.py, запуск с --smoke); в обычном запуске Rust ничего не делает.
+  invoke("smoke_ready", { keys: Object.keys(V).length, welcome: !$("welcome").classList.contains("hidden") }).catch(() => {});
   // Перезапустились от администратора ради подбора zapret — продолжаем.
   const act = await invoke("take_startup_action").catch(() => null);
   if (act === "zapret-test") { await openZapret(); runZapretTest(); }
