@@ -45,7 +45,7 @@ pub fn sanitize_outbounds(list: Vec<Value>) -> (Vec<Value>, Vec<String>) {
             match crate::defang::check(&mut o) {
                 Err(why) => return off(why, &mut notes),
                 Ok(removed) if !removed.is_empty() => {
-                    notes.push(tr!("из «{tag}» убрано: {} (лезет в файлы/сеть компа)", removed.join(", ")))
+                    notes.push(tr!("из «{tag}» убрано: {} (из чужих подписок rxvpn пускает только известные безопасные настройки; сервер без этого может не подключиться)", removed.join(", ")))
                 }
                 Ok(_) => {}
             }

@@ -852,7 +852,7 @@
  "защищённая копия не запустилась: {e}": "the protected copy did not start: {e}",
  "защищённая копия: ядро не скачалось с GitHub — {e}": "protected copy: the core was not downloaded from GitHub — {e}",
  "идёт подбор стратегии": "strategy tuning is in progress",
- "из «{tag}» убрано: {} (лезет в файлы/сеть компа)": "removed from “{tag}”: {} (reaches into the PC's files/network)",
+ "из «{tag}» убрано: {} (из чужих подписок rxvpn пускает только известные безопасные настройки; сервер без этого может не подключиться)": "removed from “{tag}”: {} (from third-party subscriptions rxvpn lets through only known safe settings; the server may not connect without it)",
  "из трея: {what}": "from tray: {what}",
  "измерено {} из {}{}{}, ушло {mb} МБ": "measured {} of {}{}{}, used {mb} MB",
  "имя": "name",

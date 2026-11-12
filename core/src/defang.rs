@@ -51,8 +51,29 @@ const NETWORKS: &[&str] = &[
 ];
 
 /// Что можно оставить в чужом FinalMask: тип → разрешённые ключи settings.
-const MASK_TCP: &[(&str, &[&str])] = &[("fragment", &["packets", "lengths", "delays", "maxSplit"])];
+///
+/// Сверено с исходником Xray 26.10.21 (`infra/conf/transport_finalmask.go`): `sudoku` — пароль,
+/// алфавит, таблицы и размер добивки; `header-custom` для TCP — последовательности байтов с
+/// задержками. Ни тот, ни другой не читают файлов и никуда не подключаются — это только то,
+/// как выглядят байты к серверу. Остальные типы (`xdns`, `xicmp`, `realm`, `xmc`, `filter`,
+/// `mkcp-legacy`, UDP-вариант `header-custom`) сами ходят в сеть или пока не нужны — не пускаем.
+const SUDOKU: &[&str] = &[
+    "password", "ascii", "customTable", "custom_table", "customTables", "custom_tables",
+    "paddingMin", "padding_min", "paddingMax", "padding_max",
+];
+const MASK_TCP: &[(&str, &[&str])] = &[
+    ("fragment", &["packets", "lengths", "delays", "maxSplit"]),
+    ("sudoku", SUDOKU),
+    ("header-custom", &["clients", "servers", "errors"]),
+];
+/// Кусочек последовательности `header-custom` и его вычисляемая часть (`transform`).
+const CUSTOM_ITEM: &[&str] = &["delay", "rand", "randRange", "capture", "type", "reuse", "transform", "packet"];
+const CUSTOM_EXPR: &[&str] = &["op", "args"];
+const CUSTOM_ARG: &[&str] = &["type", "bytes", "u64", "reuse", "metadata", "transform"];
+/// Глубже выражения в `transform` не разбираем — обрезаем.
+const CUSTOM_DEPTH: usize = 8;
 const MASK_UDP: &[(&str, &[&str])] = &[
+    ("sudoku", SUDOKU),
     ("noise", &["reset", "noise"]),
     // обфускация hysteria2
     ("salamander", &["password", "packetSize"]),
@@ -144,6 +165,58 @@ fn keep_keys(m: &mut Map<String, Value>, allowed: &[&str], removed: &mut Vec<Str
     }
 }
 
+/// `transform` из `header-custom`: {op, args: [{bytes|u64|reuse|metadata|transform}]}.
+fn custom_expr(v: &mut Value, depth: usize, removed: &mut Vec<String>) {
+    let Some(m) = v.as_object_mut().filter(|_| depth < CUSTOM_DEPTH) else {
+        *v = Value::Null;
+        return;
+    };
+    keep_keys(m, CUSTOM_EXPR, removed);
+    match m.get_mut("args").and_then(Value::as_array_mut) {
+        Some(args) => {
+            for a in args.iter_mut() {
+                match a.as_object_mut() {
+                    Some(am) => {
+                        keep_keys(am, CUSTOM_ARG, removed);
+                        if let Some(t) = am.get_mut("transform") {
+                            custom_expr(t, depth + 1, removed);
+                        }
+                    }
+                    None => *a = Value::Null,
+                }
+            }
+        }
+        None => {
+            m.remove("args");
+        }
+    }
+}
+
+/// Настройки `header-custom` (TCP): в `clients` / `servers` / `errors` — список
+/// последовательностей, в каждой — кусочки только с известными ключами. Иная форма — пусто.
+fn custom_tcp(st: &mut Map<String, Value>, removed: &mut Vec<String>) {
+    for side in ["clients", "servers", "errors"] {
+        let Some(v) = st.get_mut(side) else { continue };
+        let Some(seqs) = v.as_array_mut() else {
+            *v = Value::Array(vec![]);
+            continue;
+        };
+        for seq in seqs.iter_mut() {
+            let Some(items) = seq.as_array_mut() else {
+                *seq = Value::Array(vec![]);
+                continue;
+            };
+            items.retain(Value::is_object);
+            for it in items.iter_mut().filter_map(Value::as_object_mut) {
+                keep_keys(it, CUSTOM_ITEM, removed);
+                if let Some(t) = it.get_mut("transform") {
+                    custom_expr(t, 0, removed);
+                }
+            }
+        }
+    }
+}
+
 fn mask_items(list: &mut Value, table: &[(&str, &[&str])], removed: &mut Vec<String>) -> Result<(), String> {
     let Some(items) = list.as_array_mut() else {
         *list = Value::Array(vec![]);
@@ -160,6 +233,9 @@ fn mask_items(list: &mut Value, table: &[(&str, &[&str])], removed: &mut Vec<Str
         keep_keys(obj, &["type", "settings"], removed);
         if let Some(st) = obj.get_mut("settings").and_then(Value::as_object_mut) {
             keep_keys(st, keys, removed);
+            if ty == "header-custom" {
+                custom_tcp(st, removed);
+            }
             if let Some(noise) = st.get_mut("noise").and_then(Value::as_array_mut) {
                 for n in noise.iter_mut().filter_map(Value::as_object_mut) {
                     keep_keys(n, NOISE_ITEM, removed);
@@ -238,15 +314,65 @@ mod tests {
               "xhttpSettings": {"extra": {"xPaddingBytes": "100", "downloadSettings": {"network": "xhttp",
                 "xdriveSettings": {"remoteFolder": "\\\\evil\\s"},
                 "finalmask": {"udp": [{"type": "noise", "settings": {"script": "\\\\evil\\n.lua", "noise": [{"rand": "1-8", "evil": 1}]}},
-                                      {"type": "sudoku", "settings": {}}],
+                                      {"type": "xdns", "settings": {"resolvers": [{"addrs": ["udp://203.0.113.9"]}]}}],
                               "tcp": [{"type": "fragment", "settings": {"packets": "tlshello", "lengths": ["1-2"], "keyFile": "x"}}],
                               "quicParams": {"congestion": "bbr", "weird": {"script": "x"}}}}}}}});
         let removed = check(&mut v).unwrap();
         let t = v.to_string().to_lowercase();
-        for bad in ["masterkeylog", "reverse", "xdrive", "remotefolder", "script", "sudoku", "keyfile", "evil\":1", "weird"] {
+        for bad in ["masterkeylog", "reverse", "xdrive", "remotefolder", "script", "xdns", "resolvers", "keyfile", "evil\":1", "weird"] {
             assert!(!t.contains(bad), "{bad} остался: {t}");
         }
         assert!(t.contains("xpaddingbytes") && t.contains("tlshello") && t.contains("\"rand\"") && t.contains("bbr"), "{t}");
         assert!(!removed.is_empty());
+    }
+
+    /// Маскировки `sudoku` и `header-custom` (TCP) из чужой подписки остаются — но только
+    /// известные ключи; типы, которые сами ходят в сеть, по-прежнему вырезаются.
+    #[test]
+    fn sudoku_and_header_custom_are_kept_narrowly() {
+        let mut v = json!({"protocol": "vless", "streamSettings": {"network": "tcp", "finalmask": {
+            "tcp": [
+                {"type": "sudoku", "settings": {"password": "p", "ascii": "prefer_entropy", "paddingMin": 2, "paddingMax": 7, "evilKey": 1, "certificateFile": "C:\\x"}},
+                {"type": "header-custom", "settings": {
+                    "clients": [[{"type": "hex", "packet": "0a0b", "delay": "1-2", "weird": 1},
+                                 {"transform": {"op": "concat", "script": "x.lua", "args": [{"type": "str", "bytes": "ab", "odd": 1}, {"transform": {"op": "sha256", "args": [{"reuse": "v"}]}}]}},
+                                 "не объект"]],
+                    "servers": [],
+                    "errors": "не список",
+                    "resolvers": ["udp://203.0.113.9"]}},
+                {"type": "xmc", "settings": {"hostname": "evil.example"}},
+                {"type": "filter", "settings": {"allowedSourceIPs": ["0.0.0.0/0"]}}],
+            "udp": [
+                {"type": "sudoku", "settings": {"password": "p", "custom_tables": ["a"]}},
+                {"type": "header-custom", "settings": {"client": [{"packet": [1]}]}},
+                {"type": "realm", "settings": {"url": "https://evil.example"}},
+                {"type": "xicmp", "settings": {"ips": ["203.0.113.9"]}}]}}});
+        let removed = check(&mut v).unwrap();
+        let fm = &v["streamSettings"]["finalmask"];
+        assert_eq!(fm["tcp"].as_array().unwrap().len(), 2, "sudoku и header-custom: {fm}");
+        assert_eq!(fm["tcp"][0]["settings"], json!({"password": "p", "ascii": "prefer_entropy", "paddingMin": 2, "paddingMax": 7}));
+        let hc = &fm["tcp"][1]["settings"];
+        assert_eq!(hc["clients"][0][0], json!({"type": "hex", "packet": "0a0b", "delay": "1-2"}));
+        assert_eq!(hc["clients"][0][1], json!({"transform": {"op": "concat", "args": [{"type": "str", "bytes": "ab"}, {"transform": {"op": "sha256", "args": [{"reuse": "v"}]}}]}}));
+        assert_eq!(hc["clients"][0].as_array().unwrap().len(), 2, "не-объект выброшен");
+        assert_eq!(hc["errors"], json!([]));
+        assert!(hc.get("resolvers").is_none());
+        assert_eq!(fm["udp"], json!([{"type": "sudoku", "settings": {"password": "p", "custom_tables": ["a"]}}]), "UDP: только sudoku");
+        let t = v.to_string();
+        for bad in ["evil", "xmc", "realm", "xicmp", "allowedSourceIPs", "script", "weird", "odd", "certificateFile", "203.0.113.9"] {
+            assert!(!t.contains(bad), "{bad} остался: {t}");
+        }
+        for must in ["finalmask «xmc»", "finalmask «filter»", "finalmask «realm»", "finalmask «xicmp»", "finalmask «header-custom»"] {
+            assert!(removed.iter().any(|r| r == must), "{must}: {removed:?}");
+        }
+
+        // Слишком глубокое выражение обрезается, а не разбирается бесконечно.
+        let mut deep = json!({"op": "x", "args": [{"u64": 1}]});
+        for _ in 0..20 {
+            deep = json!({"op": "x", "args": [{"transform": deep}]});
+        }
+        let mut v = json!({"streamSettings": {"network": "tcp", "finalmask": {"tcp": [{"type": "header-custom", "settings": {"clients": [[{"transform": deep}]]}}]}}});
+        check(&mut v).unwrap();
+        assert!(v.to_string().matches("\"op\"").count() <= CUSTOM_DEPTH, "{v}");
     }
 }
