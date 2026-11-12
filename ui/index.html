@@ -192,6 +192,7 @@
           <button type="button" id="ht-speed" title="Скорость через VPN (Cloudflare)">Скорость</button>
           <button type="button" id="ht-svc" title="Страна сервера и работают ли ChatGPT, Gemini, YouTube Premium, Netflix">Сервисы</button>
           <button type="button" id="ht-tweak" title="Сервер не подключается? Подберу обход блокировки">Обход</button>
+          <button type="button" id="ht-upd" title="Проверить, не вышла ли новая версия rxvpn">Обновления</button>
         </div>
        </div>
       </div>
@@ -360,6 +361,8 @@
 
         <div class="whatsnew" id="whatsnew">
           <div class="wn-head"><b>Что нового в 0.14–0.19</b><button class="ghost small" id="btn-wn-hide">Скрыть</button></div>
+          <button class="wn-row" data-go="home"><span>0.19.1: кнопка «Обновления» на главной — проверить новую версию сейчас</span><span class="nav-meta">Главная ›</span></button>
+          <button class="wn-row" data-go="servers"><span>0.19.1: серверы с маскировкой sudoku и header-custom из подписок подключаются</span><span class="nav-meta">Сервера ›</span></button>
           <button class="wn-row" data-go="more:btn-settings"><span>0.19: kill switch работает вместе с «Через zapret, мимо VPN»</span><span class="nav-meta">Ещё → Настройки ›</span></button>
           <button class="wn-row" data-go="home"><span>0.19: плашка на главной честно говорит, что идёт через VPN при каждом маршруте</span><span class="nav-meta">Главная ›</span></button>
           <button class="wn-row" data-go="home"><span>0.18: состояние защиты на главной — что сейчас закрыто, а что нет</span><span class="nav-meta">Главная ›</span></button>
@@ -554,7 +557,7 @@
         <button type="button" class="ghost small" id="btn-upd-check">Проверить</button>
         <button type="button" class="primary small hidden" id="btn-upd-apply">Обновить</button>
       </div>
-      <p class="hint" id="upd-hint">Раз в день rxvpn сам смотрит новую версию на GitHub. Ставится только по кнопке:
+      <p class="hint" id="upd-hint">Каждые 3 часа rxvpn сам смотрит новую версию на GitHub. Ставится только по кнопке:
         перед заменой сверяются подпись автора, хеш и что версия новее текущей.</p>
 
       <div class="dlg-actions">

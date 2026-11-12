@@ -105,6 +105,9 @@ try {
     Net "A. новая сборка подключена (ждём: всё открывается, блокировка=True)"
     Go-Home
     Shot "A-connected"
+    $null = Click-Button "Обновления"
+    Start-Sleep 6
+    Shot "A-update-check"
     netsh wfp show filters file="$out\wfp-A.xml" | Out-Null
     $x = Get-Content "$out\wfp-A.xml" -Raw
     Log ("A. фильтров «rxvpn kill switch» в wfp-A.xml: {0} (ждём 22: 16 постоянных, 2 туннель, 4 пакеты zapret)" -f ([regex]::Matches($x, "<name>rxvpn kill switch</name>")).Count)

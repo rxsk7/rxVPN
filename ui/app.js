@@ -2982,6 +2982,20 @@ function renderShield() {
   }
 }
 $("btn-upd-home").onclick = () => $("btn-upd-apply").onclick();
+// «Обновления» на главной: проверить прямо сейчас, не дожидаясь фоновой проверки.
+$("ht-upd").onclick = async () => {
+  const b = $("ht-upd");
+  if (b.disabled) return;
+  b.disabled = true;
+  try {
+    const u = await call("update_check");
+    showUpd(u);
+    if (u.version) { await refresh(); toast(t("Есть rxvpn {version} — жми плашку «обновить» вверху", { version: u.version })); }
+    else if (!u.configured) toast(t("В этой сборке обновления не настроены"));
+    else toast(t("У тебя последняя версия — {current}", { current: u.current }));
+  } catch { /* причину уже показал call() */ }
+  finally { b.disabled = false; }
+};
 
 // ---------- всё ли в порядке ----------
 function renderHealth() {

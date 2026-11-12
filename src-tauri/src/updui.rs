@@ -1,4 +1,4 @@
-//! Обновление rxvpn по кнопке (проверка — раз в день сама, с уведомлением).
+//! Обновление rxvpn по кнопке (проверка — сама каждые 3 часа, с уведомлением, и кнопкой «Обновления» на главной).
 
 use rxvpn_core::{tr, trs};
 use super::*;
@@ -110,7 +110,8 @@ fn portable_exe(paths: &Paths) -> Option<PathBuf> {
     paths.data.parent().map(|d| d.join(rxvpn_core::protect::EXE)).filter(|p| p.is_file())
 }
 
-/// Раз в день: есть новее — уведомление (ставится только по кнопке).
+/// Каждые 3 часа (раз в сутки было мало: свежий релиз ждали до суток): есть новее —
+/// уведомление и плашка на главной (ставится только по кнопке).
 pub(crate) fn spawn_daily(app: AppHandle) {
     if update::REPO.is_none() || update::PUBKEY_HEX.is_none() {
         return;
@@ -133,7 +134,7 @@ pub(crate) fn spawn_daily(app: AppHandle) {
                 Ok(_) => {}
                 Err(e) => log(&app, tr!("обновление: проверить не вышло — {e}")),
             }
-            tokio::time::sleep(Duration::from_secs(24 * 3600)).await;
+            tokio::time::sleep(Duration::from_secs(3 * 3600)).await;
         }
     });
 }
