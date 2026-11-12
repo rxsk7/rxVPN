@@ -84,7 +84,7 @@ function Click-Button([string]$name) {
 }
 
 # Окно помнит последнюю вкладку — значки защиты и экран «интернет закрыт» видны только на главной.
-function Go-Home { $null = Click-Button "Главная"; Start-Sleep 2 }
+function Go-Home { for ($n = 0; $n -lt 3; $n++) { if (Click-Button "Главная") { break } }; Start-Sleep 2 }
 
 $bak = Join-Path $out "backup"
 New-Item -ItemType Directory -Force $bak | Out-Null
@@ -106,8 +106,11 @@ try {
     Go-Home
     Shot "A-connected"
     $null = Click-Button "Обновления"
-    Start-Sleep 6
-    Shot "A-update-check"
+    # Сообщение о результате висит несколько секунд — снимаем сразу и ещё раз чуть позже.
+    Start-Sleep -Milliseconds 1200
+    Shot "A-update-check-1"
+    Start-Sleep -Milliseconds 1500
+    Shot "A-update-check-2"
     netsh wfp show filters file="$out\wfp-A.xml" | Out-Null
     $x = Get-Content "$out\wfp-A.xml" -Raw
     Log ("A. фильтров «rxvpn kill switch» в wfp-A.xml: {0} (ждём 22: 16 постоянных, 2 туннель, 4 пакеты zapret)" -f ([regex]::Matches($x, "<name>rxvpn kill switch</name>")).Count)
