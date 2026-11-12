@@ -8,7 +8,9 @@ param(
     [Parameter(Mandatory = $true)][string]$NewExe,
     [string]$Protected = "C:\Program Files\rxvpn",
     [string]$Task = "rxvpn\Autostart",
-    [string]$Gateway = "192.168.0.1"
+    [string]$Gateway = "192.168.0.1",
+    # Короткий прогон: только подключение (A) и экран «интернет закрыт» с кнопкой (E).
+    [switch]$Short
 )
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
@@ -81,6 +83,9 @@ function Click-Button([string]$name) {
     } catch { Log "кнопка «$name»: $_"; return $false }
 }
 
+# Окно помнит последнюю вкладку — значки защиты и экран «интернет закрыт» видны только на главной.
+function Go-Home { $null = Click-Button "Главная"; Start-Sleep 2 }
+
 $bak = Join-Path $out "backup"
 New-Item -ItemType Directory -Force $bak | Out-Null
 $exe = Join-Path $Protected "rxvpn.exe"
@@ -98,11 +103,13 @@ try {
     $ok = Wait-Connected 90
     Start-Sleep 5
     Net "A. новая сборка подключена (ждём: всё открывается, блокировка=True)"
+    Go-Home
     Shot "A-connected"
     netsh wfp show filters file="$out\wfp-A.xml" | Out-Null
     $x = Get-Content "$out\wfp-A.xml" -Raw
     Log ("A. фильтров «rxvpn kill switch» в wfp-A.xml: {0} (ждём 22: 16 постоянных, 2 туннель, 4 пакеты zapret)" -f ([regex]::Matches($x, "<name>rxvpn kill switch</name>")).Count)
 
+    if (-not $Short) {
     # ---- B. Убить rxvpn: интернет закрыт, локальная сеть работает ----
     Stop-Rx
     Net "B. rxvpn убит (ждём: всё «нет», роутер=ok, блокировка=True)"
@@ -112,6 +119,7 @@ try {
     Start-Rx
     $ok = Wait-Connected 90
     Net "C. запущен снова (ждём: всё открывается, блокировка=True)"
+    Go-Home
     Shot "C-adopted"
 
     # ---- D. Обычный выход: блокировка снялась ----
@@ -121,15 +129,17 @@ try {
     Net "D. после обычного выхода (ждём: блокировка=False, ya.ru и 1.1.1.1 открываются напрямую)"
     Shot "D-exited"
     Stop-Rx
-
-    # ---- E. Экран «интернет закрыт» и кнопка «Открыть интернет без VPN» ----
     Start-Rx
     $ok = Wait-Connected 90
+    }
+
+    # ---- E. Экран «интернет закрыт» и кнопка «Открыть интернет без VPN» ----
     Stop-Rx
     Patch @("auto_connect=false")
     Start-Rx
     Start-Sleep 12
     Net "E1. перенял без автоподключения (ждём: всё «нет», блокировка=True)"
+    Go-Home
     Shot "E1-closed-screen"
     $clicked = Click-Button "Открыть интернет без VPN"
     Start-Sleep 5
