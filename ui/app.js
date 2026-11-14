@@ -122,8 +122,8 @@ const isOn = () => !!V && (V.connected || V.zapret_active);
 const curMode = () => (V.settings.zapret ? "zapret" : V.settings.tun ? "tun" : "proxy");
 const MODE_HINT = {
   proxy: tk("Через VPN — браузер, Telegram и программы, которые слушаются системного прокси"),
-  tun: tk("Через VPN — весь компьютер, включая игры (нужны права администратора)"),
-  zapret: tk("VPN-сервер не нужен: YouTube и Discord напрямую, мимо «замедлялки» провайдера (zapret)"),
+  tun: tk("Все программы и игры проходят через rxvpn, а что уйдёт в VPN — решает маршрут ниже (нужны права администратора)"),
+  zapret: tk("VPN выключен, правила «через VPN» не действуют: YouTube и Discord напрямую, мимо «замедлялки» провайдера (zapret)"),
 };
 const ROUTE_HINT = {
   bypassru: tk("Российские сайты — напрямую, всё остальное — через VPN"),
@@ -163,7 +163,7 @@ function render() {
   $("status-text").textContent = busy ? t("Подождите…")
     : V.zapret_testing ? t("Подбираю стратегию zapret…")
     : V.zapret_active ? t("Без VPN · zapret")
-    : V.connected ? (V.tun_active ? t("Подключено · весь комп") : t("Подключено")) + (V.hybrid_active ? t(" · YouTube через zapret") : "")
+    : V.connected ? (V.tun_active ? t("Подключено · все программы") : t("Подключено")) + (V.hybrid_active ? t(" · YouTube через zapret") : "")
     : t("Отключено");
 
   const p = $("btn-connect");
@@ -1148,7 +1148,7 @@ document.querySelectorAll("#seg-mode button").forEach((b) => {
     const tun = m === "tun";
     adminKind = "tun";
     saveSettingsPatch({ zapret: false, tun }, tun
-      ? (isOn() ? t("TUN: весь трафик компа идёт через VPN") : t("TUN включится при подключении"))
+      ? (isOn() ? t("«Все программы»: трафик всех программ проходит через rxvpn, в VPN — по маршруту") : t("TUN включится при подключении"))
       : t("Режим прокси"));
   };
 });
@@ -1222,16 +1222,16 @@ async function runIp() {
     box.replaceChildren();
     if (r.vpn) box.append(ipCard(t("Через VPN — так тебя видят сайты"), r.vpn));
     if (r.direct) box.append(ipCard(r.connected ? t("Без VPN — твой провайдер") : t("Сейчас (VPN выключен)"), r.direct));
-    if (r.tun) box.append(el("p", "hint", t("TUN: весь трафик компа и так идёт через VPN — «без VPN» не меряю.")));
+    if (r.tun) box.append(el("p", "hint", t("Режим «Все программы»: весь трафик компа идёт через rxvpn — «без VPN» не меряю.")));
     const v6 = {
       no_ipv6: ["ok", t("IPv6: не работает — утечки через него нет.")],
       tunneled: ["ok", t("IPv6: идёт через VPN{seen}.", { seen: r.v6.seen ? t(" (сайты видят {seen})", { seen: r.v6.seen }) : "" })],
       leak: ["bad", t("IPv6: УТЕЧКА — сайты видят твой настоящий адрес {seen}. Отключи IPv6 у сетевой карты (Свойства адаптера → снять «IP версии 6») и переподключись.", { seen: r.v6.seen })],
-      direct: ["", t("IPv6: есть ({seen}). Браузер идёт через прокси VPN, а программы без прокси — напрямую. Нужен весь комп через VPN — режим «Весь комп».", { seen: r.v6.seen })],
+      direct: ["", t("IPv6: есть ({seen}). Браузер идёт через прокси VPN, а программы без прокси — напрямую. Нужны все программы через VPN — режим «Все программы».", { seen: r.v6.seen })],
     }[r.v6.verdict];
     if (v6) box.append(el("p", "hint " + v6[0], v6[1]));
     box.append(el("p", "hint", t("WebRTC: браузер может показать сайту твой IP в обход прокси (видеозвонки). ") +
-      t("В режиме «Браузер» включи в uBlock Origin «Не допускать утечку локальных IP через WebRTC» — или используй «Весь комп».")));
+      t("В режиме «Браузер» включи в uBlock Origin «Не допускать утечку локальных IP через WebRTC» — или используй «Все программы».")));
   } catch {
     box.replaceChildren(el("p", "hint bad", t("Не получилось — подробности в логе")));
   } finally {

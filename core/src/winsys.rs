@@ -585,6 +585,43 @@ pub fn physical_interface(tun: &str) -> Option<u32> {
     }
 }
 
+/// Сетевая карта с настоящим шлюзом в интернет — не туннель `tun`. В отличие от
+/// `physical_interface`, работает и при включённом TUN: смотрит не «лучший путь» (это сам
+/// туннель), а таблицу маршрутов — маршрут по умолчанию со шлюзом, с наименьшей метрикой.
+#[cfg(windows)]
+pub fn gateway_interface(tun: &str) -> Option<u32> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIpForwardTable2, MIB_IPFORWARD_TABLE2};
+    use windows_sys::Win32::Networking::WinSock::AF_INET;
+    let mut table: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
+    if unsafe { GetIpForwardTable2(AF_INET, &mut table) } != 0 || table.is_null() {
+        return None;
+    }
+    let mut best: Option<(u32, u32)> = None;
+    unsafe {
+        let n = (*table).NumEntries as usize;
+        let rows = std::slice::from_raw_parts((*table).Table.as_ptr(), n);
+        for r in rows {
+            // 0.0.0.0/0 со шлюзом: у туннеля шлюза нет (0.0.0.0), у карты — адрес роутера.
+            if r.DestinationPrefix.PrefixLength != 0 || r.NextHop.Ipv4.sin_addr.S_un.S_addr == 0 {
+                continue;
+            }
+            if iface_alias(r.InterfaceIndex).is_none_or(|a| a.eq_ignore_ascii_case(tun)) {
+                continue;
+            }
+            if best.is_none_or(|(m, _)| r.Metric < m) {
+                best = Some((r.Metric, r.InterfaceIndex));
+            }
+        }
+        FreeMibTable(table as *const _);
+    }
+    best.map(|b| b.1)
+}
+
+#[cfg(not(windows))]
+pub fn gateway_interface(_tun: &str) -> Option<u32> {
+    None
+}
+
 /// Файл драйвера, на который указывает уже зарегистрированная служба WinDivert
 /// (её мог оставить другой zapret/GoodbyeDPI). Тогда WinDivert.dll возьмёт драйвер
 /// оттуда, а не наш сверенный. None — службы нет.

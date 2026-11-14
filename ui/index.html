@@ -159,7 +159,7 @@
         <div class="mode-block">
           <div class="seg seg-mode3" id="seg-mode">
             <button data-mode="proxy">Браузер</button>
-            <button data-mode="tun">Весь комп</button>
+            <button data-mode="tun">Все программы</button>
             <button data-mode="zapret">Без VPN</button>
           </div>
           <div class="mode-hint" id="mode-hint"></div>
@@ -262,7 +262,7 @@
     <!-- Маршруты: что через VPN, что мимо -->
     <section class="page" data-page="routes">
       <div class="page-inner">
-        <p class="hint page-note hidden" id="routes-note">Сейчас режим «Без VPN» — маршруты действуют, когда включён VPN («Браузер» или «Весь комп»).</p>
+        <p class="hint page-note hidden" id="routes-note">Сейчас режим «Без VPN» — маршруты действуют, когда включён VPN («Браузер» или «Все программы»).</p>
 
         <div class="group" id="route-field">
           <h3 class="sec">Что пускать через VPN</h3>
@@ -375,7 +375,11 @@
         </div>
 
         <div class="whatsnew" id="whatsnew">
-          <div class="wn-head"><b>Что нового в 0.14–0.19</b><button class="ghost small" id="btn-wn-hide">Скрыть</button></div>
+          <div class="wn-head"><b>Что нового в 0.14–0.20</b><button class="ghost small" id="btn-wn-hide">Скрыть</button></div>
+          <button class="wn-row" data-go="servers"><span>0.20: проверка серверов, скорости и «Сервисы» работают и при включённом «Все программы»</span><span class="nav-meta">Сервера ›</span></button>
+          <button class="wn-row" data-go="home"><span>0.20: режим «Весь комп» теперь называется «Все программы» — что уйдёт в VPN, решает маршрут</span><span class="nav-meta">Главная ›</span></button>
+          <button class="wn-row" data-go="home"><span>0.20: Claude и ChatGPT в маршруте «Только блок.» — вход больше не ломается</span><span class="nav-meta">Главная ›</span></button>
+          <button class="wn-row" data-go="more:btn-settings"><span>0.20: «Разрешить IPv6» больше не рвёт соединения, если у провайдера IPv6 нет</span><span class="nav-meta">Ещё → Настройки ›</span></button>
           <button class="wn-row" data-go="home"><span>0.19.1: кнопка «Обновления» на главной — проверить новую версию сейчас</span><span class="nav-meta">Главная ›</span></button>
           <button class="wn-row" data-go="servers"><span>0.19.1: серверы с маскировкой sudoku и header-custom из подписок подключаются</span><span class="nav-meta">Сервера ›</span></button>
           <button class="wn-row" data-go="more:btn-settings"><span>0.19: kill switch работает вместе с «Через zapret, мимо VPN»</span><span class="nav-meta">Ещё → Настройки ›</span></button>
@@ -447,7 +451,7 @@
       <label class="check"><input type="checkbox" name="close_to_tray" /> Крестик сворачивает в трей, а не закрывает</label>
       <p class="hint">Выйти совсем — правой кнопкой по значку у часов → «Выход».</p>
       <label class="check"><input type="checkbox" name="run_as_admin" /> Запускать с правами администратора</label>
-      <p class="hint">Нужно для zapret и режима «Весь комп»: они меняют сеть всего компа (драйвер WinDivert,
+      <p class="hint">Нужно для zapret и режима «Все программы»: они меняют сеть всего компа (драйвер WinDivert,
         сетевой адаптер TUN), а Windows разрешает это только администратору. С галочкой rxvpn при каждом
         запуске — и при входе в Windows — спросит права в окне «Да/Нет». Без неё спросит только когда
         понадобятся. Окно появилось, а rxvpn ты не запускал — жми «Нет».</p>
@@ -459,9 +463,9 @@
       </div>
       <p class="hint">Не ставь 10808/10809 — их занимают Happ и v2rayN.</p>
       <label class="check"><input type="checkbox" name="system_proxy" /> Ставить системный прокси Windows (в режиме «Прокси»)</label>
-      <label class="check"><input type="checkbox" name="kill_switch" /> Kill switch в режиме «Весь комп»</label>
+      <label class="check"><input type="checkbox" name="kill_switch" /> Kill switch в режиме «Все программы»</label>
       <p class="hint">Упал VPN — интернет закрывается, пока не подключишься снова: ни одна программа не уйдёт в сеть
-        с твоим настоящим IP. Локальная сеть (принтер, роутер) работает. Не работает вместе с «Через zapret, мимо VPN».
+        с твоим настоящим IP. Локальная сеть (принтер, роутер) работает. Сайты «Через zapret, мимо VPN» идут как обычно.
         Вышел из rxvpn — блокировка снимается. Упал сам rxvpn или его сняли в диспетчере задач — интернет остаётся
         закрытым: запусти rxvpn снова или перезагрузи компьютер.</p>
       <label>Горячая клавиша «Подключить / Отключить»<input type="text" name="hotkey" placeholder="Ctrl+Alt+V" maxlength="40" spellcheck="false" /></label>
@@ -637,7 +641,7 @@
       <label class="check"><input type="checkbox" id="tor-isolate" /> У каждого сайта своя цепочка Tor (сайты не связать
         между собой по выходному узлу)</label>
       <p class="hint" id="tor-status"></p>
-      <p class="hint">В «Всё через Tor» DNS-запросы программ в режиме «Весь комп» идут через VPN, не через Tor.
+      <p class="hint">В «Всё через Tor» DNS-запросы программ в режиме «Все программы» идут через VPN, не через Tor.
         Для анонимности лучше Tor Browser: браузер сам по себе выдаёт много лишнего.</p>
       <div class="dlg-actions">
         <span class="grow"></span>

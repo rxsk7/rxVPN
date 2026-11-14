@@ -115,7 +115,7 @@ fn state_lines(st: &AppState) -> Vec<(String, String)> {
     let mode = if s.settings.zapret {
         trs!("Без VPN (zapret)")
     } else if s.settings.tun {
-        trs!("Весь комп (TUN)")
+        trs!("Все программы (TUN)")
     } else {
         trs!("Браузер (системный прокси)")
     };

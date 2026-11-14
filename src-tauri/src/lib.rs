@@ -156,13 +156,16 @@ struct AppState {
     wl_busy: AtomicBool,
     /// Для «Всё ли в порядке»: zapret перестал пробивать; последняя проверка DNS — утечка.
     zapret_broken: AtomicBool,
-    /// Kill switch (режим «Весь комп»): фильтры WFP держатся, пока он здесь (core/src/killswitch.rs).
+    /// Kill switch (режим «Все программы»): фильтры WFP держатся, пока он здесь (core/src/killswitch.rs).
     kill: Mutex<Option<rxvpn_core::killswitch::KillSwitch>>,
     /// Запасные протоколы того же сервера, уже пробованные после сбоя (сброс — reset_auto).
     fallback_tried: Mutex<std::collections::HashSet<String>>,
     /// Трафик по программам: сессия ETW, пока открыто окно (app_traffic / app_traffic_stop).
     app_traffic: Mutex<Option<rxvpn_core::apptraffic::AppTraffic>>,
     dns_leak: AtomicBool,
+    /// «Разрешить IPv6» включено, но при последнем подключении IPv6 у сетевых карт не было —
+    /// программам выдаётся только IPv4 (см. start_core).
+    ipv6_off: AtomicBool,
     /// Стабильность серверов (data\stats.json) и есть ли несохранённое.
     stats: Mutex<rxvpn_core::stats::Stats>,
     stats_dirty: AtomicBool,
@@ -244,17 +247,17 @@ struct ShieldItem {
 /// Что защищено прямо сейчас — честно, по состоянию программы, без догадок. Только пока
 /// VPN подключён: без него защищать нечего (про закрытый kill switch'ем интернет говорит
 /// сама главная).
-fn shield(s: &Settings, connected: bool, tun: bool, kill_on: bool, dns_leak: bool) -> Vec<ShieldItem> {
+fn shield(s: &Settings, connected: bool, tun: bool, kill_on: bool, dns_leak: bool, v6_off: bool) -> Vec<ShieldItem> {
     let mut v = Vec::new();
     if !connected {
         return v;
     }
     let mut add = |level: &'static str, text: &str, hint: &str| v.push(ShieldItem { level, text: text.into(), hint: hint.into() });
     if tun {
-        // Что именно идёт через VPN, решает маршрут: «Весь комп» — это про программы, а не про сайты.
+        // Что именно идёт через VPN, решает маршрут: «Все программы» — это про программы, а не про сайты.
         match s.route {
-            RouteMode::Global => add("ok", trs!("Весь комп через VPN"), trs!("Маршрут «Всё»: через VPN идут все программы, игры и службы Windows, на любые сайты")),
-            RouteMode::BypassRu => add("ok", trs!("Весь комп через VPN, кроме РФ"), trs!("Маршрут «Обход РФ»: все программы, игры и службы Windows идут через VPN, а российские сайты — напрямую, с твоим IP")),
+            RouteMode::Global => add("ok", trs!("Всё через VPN"), trs!("Маршрут «Всё»: через VPN идут все программы, игры и службы Windows, на любые сайты")),
+            RouteMode::BypassRu => add("ok", trs!("Всё через VPN, кроме РФ"), trs!("Маршрут «Обход РФ»: все программы, игры и службы Windows идут через VPN, а российские сайты — напрямую, с твоим IP")),
             RouteMode::Blocked => add("warn", trs!("Через VPN — только заблокированное"), trs!("Маршрут «Только блок.»: через VPN идут только сайты, заблокированные в РФ, — из любых программ. Всё остальное — напрямую, с твоим IP")),
         }
         if kill_on && s.zapret_hybrid {
@@ -267,12 +270,15 @@ fn shield(s: &Settings, connected: bool, tun: bool, kill_on: bool, dns_leak: boo
             add("warn", trs!("Kill switch выключен"), trs!("Упадёт VPN — программы пойдут в интернет напрямую. Включается в настройках"));
         }
     } else {
-        add("warn", trs!("Через VPN — только браузер"), trs!("Режим «Браузер»: через VPN идут программы, которые слушаются системного прокси Windows. Игры и остальные программы — напрямую. Всё целиком — режим «Весь комп»"));
+        add("warn", trs!("Через VPN — только браузер"), trs!("Режим «Браузер»: через VPN идут программы, которые слушаются системного прокси Windows. Игры и остальные программы — напрямую. Всё целиком — режим «Все программы»"));
     }
     if dns_leak {
         add("bad", trs!("DNS идёт мимо VPN"), trs!("Последняя проверка нашла утечку: провайдер видит имена сайтов. Открой «Мой IP и утечки»"));
     } else if tun {
         add("ok", trs!("DNS через VPN"), trs!("Имена сайтов узнаются внутри туннеля — провайдер их не видит"));
+    }
+    if v6_off && s.dns_ipv6 {
+        add("warn", trs!("IPv6 выключен: у провайдера его нет"), trs!("В настройках стоит «Разрешить IPv6», но у твоей сети нет IPv6-адреса. С ним программы рвали бы соединения, поэтому rxvpn выдаёт им только IPv4. Сними галку в настройках — и значок пропадёт"));
     }
     v
 }
@@ -633,7 +639,7 @@ fn view(st: &AppState) -> View {
         zapret_testing: st.ztesting.load(Ordering::SeqCst),
         is_windows: cfg!(windows),
         kill_on,
-        shield: shield(&s.settings, connected, tun_now, kill_on, dns_leak),
+        shield: shield(&s.settings, connected, tun_now, kill_on, dns_leak, st.ipv6_off.load(Ordering::SeqCst)),
         update: updui::found(),
         paused: paused.is_some(),
         pause_until: paused.and_then(|p| p.until),
@@ -894,6 +900,26 @@ fn free_ports(n: usize) -> Res<Vec<u16>> {
     ls.iter().map(|l| l.local_addr().map(|a| a.port()).map_err(|e| e.to_string())).collect()
 }
 
+/// Перед проверкой серверов отдельным (пробным) Xray. Пока работает TUN, весь трафик компа
+/// уходит в туннель — и пробный Xray тоже: он проверял бы сервера через текущий VPN. Поэтому
+/// привязываем его к настоящей сетевой карте, как основной Xray. Kill switch его пропускает:
+/// он разрешает xray.exe по пути к файлу. Карту не нашли — честно отказываем.
+fn probe_bind(st: &AppState) -> Res<()> {
+    if !(is_connected(st) && st.tun_active.load(Ordering::SeqCst)) {
+        batch::set_bind(None);
+        return Ok(());
+    }
+    let tun = rxvpn_core::xray::TUN_NAME;
+    let idx = winsys::gateway_interface(tun).or_else(|| winsys::physical_interface(tun)).or(*st.phys_iface.lock().unwrap());
+    match idx.and_then(winsys::iface_alias).filter(|a| !a.eq_ignore_ascii_case(tun)) {
+        Some(alias) => {
+            batch::set_bind(Some(alias));
+            Ok(())
+        }
+        None => Err(trs!("Не нашёл сетевую карту, через которую идёт интернет, — проверка пошла бы через текущий VPN и показала неправду. Отключись на минуту").into()),
+    }
+}
+
 /// Сервера, которые Xray вообще согласен запустить (по одному, `xray run -test`).
 /// Нужно для «Авто»: один кривой сервер из подписки иначе ломает весь конфиг.
 fn usable_nodes(st: &AppState, nodes: &[Node]) -> (Vec<Node>, Vec<String>) {
@@ -973,6 +999,17 @@ fn start_core_ex(app: &AppHandle, st: &AppState, allow_tun: bool, how: HybridSta
     if !allow_tun {
         settings.tun = false;
     }
+    // «Разрешить IPv6» включено, а у сетевых карт нет IPv6-адреса из интернета: программы
+    // получали бы IPv6-адреса сайтов и шли по ним первыми, а соединения «напрямую» рвались
+    // (браузер откатывается на IPv4 сам, Spotify и многие другие — нет). Выдаём только IPv4.
+    let v6_off = settings.dns_ipv6 && winsys::local_ipv6(rxvpn_core::xray::TUN_NAME).is_empty();
+    if v6_off {
+        settings.dns_ipv6 = false;
+        if !st.ipv6_off.load(Ordering::SeqCst) {
+            log(app, trs!("IPv6 разрешён в настройках, но у провайдера его нет — выдаю программам только IPv4"));
+        }
+    }
+    st.ipv6_off.store(v6_off, Ordering::SeqCst);
     if !runner::xray_path(&st.paths.core).exists() {
         return Err(trs!("Ядро Xray не скачано. Открой настройки → «Скачать ядро»").into());
     }
@@ -1680,6 +1717,7 @@ async fn wl_find(app: &AppHandle, cur: &str) -> Option<(String, String)> {
         let nodes: Vec<_> = filter::checkable(&s).into_iter().filter(|n| n.id != cur).take(150).collect();
         (nodes, rxvpn_core::xray::finalmask(&s.settings), s.settings.node_tweaks.clone())
     };
+    let _ = probe_bind(&st);
     log(app, tr!("белые списки: ищу сервер, который пробивается (проверяю {})", nodes.len()));
     let r = batch::test_all(&st.paths.core, &nodes, mask, tweaks, |_| {}).await;
     st.testing.store(false, Ordering::SeqCst);
@@ -3280,7 +3318,7 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     }
     let mode = Submenu::with_id(app, "mode", trs!("Режим"), true)?;
     mode.append(&CheckMenuItem::with_id(app, "mode:proxy", trs!("Прокси"), true, !settings.zapret && !settings.tun, None::<&str>)?)?;
-    mode.append(&CheckMenuItem::with_id(app, "mode:tun", trs!("TUN · весь комп"), true, !settings.zapret && settings.tun, None::<&str>)?)?;
+    mode.append(&CheckMenuItem::with_id(app, "mode:tun", trs!("TUN · все программы"), true, !settings.zapret && settings.tun, None::<&str>)?)?;
     mode.append(&CheckMenuItem::with_id(app, "mode:zapret", trs!("Zapret · без VPN"), true, settings.zapret, None::<&str>)?)?;
     let ads = CheckMenuItem::with_id(app, "ads", trs!("Блокировать рекламу"), true, settings.block_ads, None::<&str>)?;
 
@@ -3785,7 +3823,7 @@ async fn delete_subscription(st: State<'_, AppState>, id: String) -> Res<View> {
 #[tauri::command]
 async fn diagnose(app: AppHandle, st: State<'_, AppState>, site: String) -> Res<rxvpn_core::diag::Report> {
     if is_connected(&st) && st.tun_active.load(Ordering::SeqCst) {
-        return Err(trs!("В режиме «Весь комп» весь трафик компа, и проверок тоже, идёт в туннель — напрямую не проверить. \
+        return Err(trs!("В режиме «Все программы» весь трафик компа, и проверок тоже, идёт в туннель — напрямую не проверить. \
                     Переключись на «Браузер» на минуту и проверь снова")
             .into());
     }
@@ -3874,9 +3912,7 @@ async fn diag_apply(app: AppHandle, st: State<'_, AppState>, host: String, actio
 /// Netflix). Отдельный временный Xray: подключение и его правила не трогает.
 #[tauri::command]
 async fn check_services(app: AppHandle, st: State<'_, AppState>, id: String) -> Res<services::Report> {
-    if is_connected(&st) && st.tun_active.load(Ordering::SeqCst) {
-        return Err(trs!("Во время TUN проверка пошла бы через текущий VPN и показала неправду. Отключись на минуту").into());
-    }
+    probe_bind(&st)?;
     if !runner::xray_path(&st.paths.core).exists() {
         return Err(trs!("Ядро Xray не скачано").into());
     }
@@ -3921,9 +3957,7 @@ struct TweakPick {
 /// и запомнить первый рабочий (от самого безобидного к самому заметному).
 #[tauri::command]
 async fn pick_tweak(app: AppHandle, st: State<'_, AppState>, id: String) -> Res<TweakPick> {
-    if is_connected(&st) && st.tun_active.load(Ordering::SeqCst) {
-        return Err(trs!("Во время TUN проверка пошла бы через текущий VPN. Отключись на минуту").into());
-    }
+    probe_bind(&st)?;
     if !runner::xray_path(&st.paths.core).exists() {
         return Err(trs!("Ядро Xray не скачано").into());
     }
@@ -4160,11 +4194,7 @@ async fn rename_group(app: AppHandle, st: State<'_, AppState>, old: String, name
 /// «Проверить все»: результаты приходят событием test-result по мере готовности.
 #[tauri::command]
 async fn test_all(app: AppHandle, st: State<'_, AppState>) -> Res<Vec<TestResult>> {
-    if is_connected(&st) && st.tun_active.load(Ordering::SeqCst) {
-        return Err(trs!("Во время TUN проверка пошла бы через текущий VPN и показала неправду. \
-                    Отключись на минуту — или включи «⚡ Авто»: там задержки обновляются сами")
-            .into());
-    }
+    probe_bind(&st)?;
     if !runner::xray_path(&st.paths.core).exists() {
         return Err(trs!("Ядро Xray не скачано").into());
     }
@@ -4210,9 +4240,7 @@ async fn test_all(app: AppHandle, st: State<'_, AppState>) -> Res<Vec<TestResult
 /// в стабильность (stats.json) и в «Авто».
 #[tauri::command]
 async fn speed_all(app: AppHandle, st: State<'_, AppState>) -> Res<Vec<batch::SpeedTestResult>> {
-    if is_connected(&st) && st.tun_active.load(Ordering::SeqCst) {
-        return Err(trs!("Во время TUN проверка пошла бы через текущий VPN и показала неправду. Отключись на минуту").into());
-    }
+    probe_bind(&st)?;
     if !runner::xray_path(&st.paths.core).exists() {
         return Err(trs!("Ядро Xray не скачано").into());
     }
@@ -5487,7 +5515,7 @@ pub fn run() {
     // «Запускать с правами администратора»: копия без прав сразу просит их (окно
     // UAC — и при входе в Windows) и закрывается; новая ждёт, пока эта отпустит
     // замок. Отказали в окне — работаем без прав: VPN «Браузер» и Telegram можно,
-    // zapret и «Весь комп» — нет.
+    // zapret и «Все программы» — нет.
     let mut elevate_refused: Option<String> = None;
     // При входе в Windows окна UAC не бывает: автозапуск с правами — задача планировщика
     // (её не подменить без прав). Пришли без прав из старого ключа Run — работаем без прав
@@ -5566,6 +5594,7 @@ pub fn run() {
         fallback_tried: Mutex::new(Default::default()),
         app_traffic: Mutex::new(None),
         dns_leak: AtomicBool::new(false),
+        ipv6_off: AtomicBool::new(false),
         stats: Mutex::new(stats),
         stats_dirty: AtomicBool::new(false),
         state_locked: AtomicBool::new(state_locked),
@@ -5704,8 +5733,8 @@ pub fn run() {
                 notify(app.handle(), trs!("rxvpn: сервера не открылись"), trs!("state.json зашифрован под другой учёткой Windows. Подробности — в логе"));
             }
             if let Some(why) = &elevate_refused {
-                log(app.handle(), tr!("запущен без прав администратора ({why}) — zapret и «Весь комп» не включатся"));
-                notify(app.handle(), trs!("rxvpn без прав администратора"), trs!("Zapret и «Весь комп» не включатся. VPN в режиме «Браузер» работает"));
+                log(app.handle(), tr!("запущен без прав администратора ({why}) — zapret и «Все программы» не включатся"));
+                notify(app.handle(), trs!("rxvpn без прав администратора"), trs!("Zapret и «Все программы» не включатся. VPN в режиме «Браузер» работает"));
             }
             if app.state::<AppState>().store.lock().unwrap().settings.tg_proxy {
                 let a = app.handle().clone();

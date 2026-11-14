@@ -20,6 +20,21 @@ use crate::xray::{build_test_config, build_variant_config, mask_test_config, Twe
 pub type Tweaks = std::collections::BTreeMap<String, Tweak>;
 use serde_json::Value;
 
+/// Сетевая карта для пробных Xray (см. `xray::bind_outbounds`). Ставит окно перед проверкой:
+/// имя карты, пока работает TUN, иначе None. Одна на всю программу — как папка списков в `runner`.
+static BIND: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn set_bind(iface: Option<String>) {
+    *BIND.lock().unwrap_or_else(|e| e.into_inner()) = iface;
+}
+
+fn bound(mut cfg: Value) -> Value {
+    if let Some(i) = BIND.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        crate::xray::bind_outbounds(&mut cfg, &i);
+    }
+    cfg
+}
+
 /// Сколько серверов проверяем одновременно.
 const PARALLEL: usize = 16;
 /// Таймаут на один адрес проверки (их два: основной и запасной).
@@ -64,7 +79,7 @@ fn test_config(pairs: &[(&Node, u16)], mask: Option<&Value>, tweaks: &Tweaks) ->
     let mut cfg = build_test_config(pairs);
     let nodes: Vec<&Node> = pairs.iter().map(|p| p.0).collect();
     mask_test_config(&mut cfg, &nodes, tweaks, mask);
-    cfg
+    bound(cfg)
 }
 
 /// То же со своими адресами проверки и таймаутом (для тестов без интернета).
@@ -283,7 +298,7 @@ pub async fn pick_tweak_with(core_dir: &Path, node: &Node, urls: &[&str], timeou
     let variants = crate::xray::tweak_variants(node);
     let ports = free_ports(variants.len())?;
     let list: Vec<(Tweak, u16)> = variants.into_iter().zip(ports).collect();
-    let cfg = build_variant_config(node, &list);
+    let cfg = bound(build_variant_config(node, &list));
     let mut proc = XrayProcess::start(core_dir, &serde_json::to_vec(&cfg).unwrap(), |_| {}, || {})
         .map_err(|e| short_core_error(&e))?;
     let mut set = tokio::task::JoinSet::new();

@@ -884,6 +884,10 @@ fn parse_ports(s: &str) -> Result<String, String> {
 
 /// Правило редактора -> правила Xray. Домены и IP — отдельными правилами
 /// (в Xray поля одного правила работают как И), остальные условия — в каждое.
+/// Списки сайтов ИИ-сервисов, которым для входа нужен ещё и `AI_COMPANION`.
+const AI_SITES: &[&str] = &["geosite:anthropic", "geosite:openai"];
+const AI_COMPANION: &str = "full:challenges.cloudflare.com";
+
 fn build_rule(r: &Rule, px: &str) -> Vec<Value> {
     let mut base = serde_json::Map::new();
     let apps = app_names(&r.apps);
@@ -913,6 +917,15 @@ fn build_rule(r: &Rule, px: &str) -> Vec<Value> {
             Ok(RuleTarget::Domain(d)) => domains.push(d),
             Ok(RuleTarget::Ip(i)) => ips.push(i),
             Err(_) => {}
+        }
+    }
+    // Claude и ChatGPT при входе показывают проверку Cloudflare «я не робот» с отдельного
+    // адреса. В маршруте «Только блок.» он шёл напрямую: сайт видел вход с IP VPN, а проверку —
+    // с российского, и не пускал. Правило «через VPN» для них берёт этот адрес с собой.
+    if matches!(r.action, Action::Proxy) && domains.iter().any(|d| AI_SITES.contains(&d.as_str())) {
+        let c = AI_COMPANION.to_string();
+        if !domains.contains(&c) {
+            domains.push(c);
         }
     }
     let with = |k: &str, v: &Vec<String>| {
@@ -1917,6 +1930,29 @@ fn routing(s: &Settings, px: &str, auto: bool, o: &RunOpts, sites: &[(&[String],
     })
 }
 
+/// Привязать исходящие пробного Xray к сетевой карте `iface` (её имя в Windows: «Ethernet»,
+/// «Wi-Fi»). Нужно, когда работает TUN: иначе пробный Xray, как любая программа, ушёл бы в
+/// туннель и проверял сервера через текущий VPN. Основной Xray делает то же сам
+/// (`autoOutboundsInterface`). Не трогаем: исходящие с `dialerProxy` (они идут через другой
+/// исходящий, а не в сеть) и WireGuard (у него нет `streamSettings`).
+pub fn bind_outbounds(cfg: &mut Value, iface: &str) {
+    let Some(outs) = cfg["outbounds"].as_array_mut() else { return };
+    for o in outs.iter_mut() {
+        let Some(m) = o.as_object_mut() else { continue };
+        if matches!(m.get("protocol").and_then(Value::as_str), None | Some("blackhole" | "dns" | "loopback" | "wireguard")) {
+            continue;
+        }
+        let ss = m.entry("streamSettings").or_insert_with(|| json!({}));
+        let Some(ss) = ss.as_object_mut() else { continue };
+        let so = ss.entry("sockopt").or_insert_with(|| json!({}));
+        let Some(so) = so.as_object_mut() else { continue };
+        if so.get("dialerProxy").is_some_and(|d| d.as_str().is_some_and(|d| !d.is_empty())) {
+            continue;
+        }
+        so.insert("interface".into(), json!(iface));
+    }
+}
+
 /// Конфиг для «Проверить все»: один Xray, на каждый сервер свой SOCKS-вход
 /// и свой исходящий, без всякой маршрутизации — проверяем именно сервер.
 pub fn build_test_config(nodes: &[(&Node, u16)]) -> Value {
@@ -2743,6 +2779,46 @@ mod tests {
         // пустой список «только эти» не должен выключать VPN для всех
         let only_empty = Settings { apps_mode: AppsMode::Only, route: RouteMode::Global, ..Default::default() };
         assert_eq!(user_rules(&build_config(&node(), &only_empty)).len(), 1);
+    }
+
+    /// Правило «ChatGPT и Claude — через VPN» берёт с собой адрес проверки Cloudflare;
+    /// «напрямую» и чужие списки — нет.
+    #[test]
+    fn ai_rule_takes_cloudflare_challenge() {
+        let n = parse_link("vless://u@8.8.8.8:443?type=tcp#t").unwrap();
+        let rule = |sites: &[&str], action| Rule { enabled: true, name: "x".into(), sites: sites.iter().map(|s| s.to_string()).collect(), apps: vec![], ports: String::new(), network: String::new(), protocols: vec![], action };
+        let s = Settings {
+            route: RouteMode::Blocked,
+            rules: vec![rule(&["geosite:openai", "geosite:anthropic"], Action::Proxy), rule(&["geosite:steam"], Action::Proxy), rule(&["geosite:anthropic"], Action::Direct)],
+            ..Default::default()
+        };
+        let c = build_run_config(&Upstream::Single(&n), &s, &RunOpts::default());
+        let has = |r: &Value| r["domain"].as_array().is_some_and(|d| d.iter().any(|x| x == AI_COMPANION));
+        let rules: Vec<&Value> = c["routing"]["rules"].as_array().unwrap().iter().filter(|r| r["domain"].as_array().is_some_and(|d| d.iter().any(|x| x.as_str().is_some_and(|x| x.starts_with("geosite:"))))).collect();
+        let by = |site: &str, to: &str| *rules.iter().find(|r| r["outboundTag"] == to && r["domain"].as_array().unwrap().iter().any(|x| x == site)).unwrap();
+        assert!(has(by("geosite:anthropic", "proxy")));
+        assert_eq!(by("geosite:anthropic", "proxy")["domain"].as_array().unwrap().len(), 3, "один раз, без повторов");
+        assert!(!has(by("geosite:steam", "proxy")));
+        assert!(!has(by("geosite:anthropic", "direct")));
+    }
+
+    /// Пробный Xray при TUN привязывается к сетевой карте — кроме исходящих без сети.
+    #[test]
+    fn probe_outbounds_bind_to_interface() {
+        let a = parse_link("vless://u@8.8.8.8:443?type=tcp#a").unwrap();
+        let mut c = build_test_config(&[(&a, 1), (&a, 2)]);
+        c["outbounds"].as_array_mut().unwrap().push(json!({"tag": "chain", "protocol": "vless", "streamSettings": {"sockopt": {"dialerProxy": "o0-proxy"}}}));
+        c["outbounds"].as_array_mut().unwrap().push(json!({"tag": "wg", "protocol": "wireguard", "settings": {}}));
+        c["outbounds"].as_array_mut().unwrap().push(json!({"tag": "odd", "protocol": "vless", "streamSettings": "строка"}));
+        bind_outbounds(&mut c, "Wi-Fi 2");
+        let outs = c["outbounds"].as_array().unwrap();
+        let get = |tag: &str| outs.iter().find(|o| o["tag"] == tag).unwrap();
+        assert_eq!(get("o0-proxy")["streamSettings"]["sockopt"]["interface"], "Wi-Fi 2");
+        assert_eq!(get("o1-proxy")["streamSettings"]["sockopt"]["interface"], "Wi-Fi 2");
+        assert!(get("chain")["streamSettings"]["sockopt"]["interface"].is_null());
+        assert!(get("wg").get("streamSettings").is_none());
+        assert!(get("block").get("streamSettings").is_none());
+        assert_eq!(get("odd")["streamSettings"], "строка", "непонятное не трогаем и не падаем");
     }
 
     #[test]

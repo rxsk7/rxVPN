@@ -228,7 +228,7 @@ static.rust-lang.org закрыт — `rustup target add x86_64-pc-windows-gnu` 
 - Глоссарий (Rust и окно совпадают): Авто → Auto; ⚡ Авто → ⚡ Auto; Подключить/Отключить → Connect/Disconnect; Главная · Сервера · Маршруты · Обход · Ещё → Home · Servers · Routes · Bypass · More; Настройки →
   Settings; Лог → Log; «Скачать ядро» → “Download core”; «Сайт → сервер» → “Site → server”; «Только заблокированное»
   (Только блок.) → “Blocked only”; Обход РФ → Bypass Russia; Всё через VPN → Everything through VPN; «Без VPN» →
-  “No VPN”; «мимо VPN» → “bypassing VPN”; «Весь комп» → “Whole PC”; «Браузер» → “Browser”; Прокси → Proxy;
+  “No VPN”; «мимо VPN» → “bypassing VPN”; «Все программы» → “All apps”; «Браузер» → “Browser”; Прокси → Proxy;
   «Подобрать лучшую» → “Find the best”; «Обновить» → “Update”; «Стоп» → “Stop”; «Фильтр»/«Фильтры» → “Filter”/“Filters”;
   «Игровой фильтр» → “Game filter”; «Всё ли в порядке» → “Is everything OK”; «Вернуть DNS» → “Restore DNS”;
   «DNS без подмены» → “DNS without spoofing”; «Telegram без VPN» → “Telegram without VPN”; «Пускать устройства из

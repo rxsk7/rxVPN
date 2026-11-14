@@ -31,7 +31,7 @@ const SERVERS: &str = "servers";
 /// маршруты, а «Нет» сбросило бы их. Убрать поле из снимка без прав нельзя — он в Program Files.
 fn fields_tofu() -> [(&'static str, &'static str); 17] {
     [
-        ("tun", trs!("Весь комп через VPN (TUN)")),
+        ("tun", trs!("Режим «Все программы» (TUN)")),
         ("auto_connect", trs!("Подключаться при запуске")),
         ("connect_apps", trs!("Автоподключение по программам")),
         ("route", trs!("Режим маршрутов")),

@@ -111,6 +111,16 @@ try {
     Shot "A-update-check-1"
     Start-Sleep -Milliseconds 1500
     Shot "A-update-check-2"
+    # 0.20: «Проверить все» при включённом TUN — пробный Xray идёт через сетевую карту, мимо туннеля.
+    for ($n = 0; $n -lt 3; $n++) { if (Click-Button "Сервера") { break } }
+    Start-Sleep 2
+    $null = Click-Button "Проверить все"
+    Start-Sleep 3
+    Shot "A-test-all-start"
+    Start-Sleep 25
+    Shot "A-test-all-done"
+    Net "A2. после «Проверить все» (ждём: связь не пропала)"
+    Go-Home
     netsh wfp show filters file="$out\wfp-A.xml" | Out-Null
     $x = Get-Content "$out\wfp-A.xml" -Raw
     Log ("A. фильтров «rxvpn kill switch» в wfp-A.xml: {0} (ждём 22: 16 постоянных, 2 туннель, 4 пакеты zapret)" -f ([regex]::Matches($x, "<name>rxvpn kill switch</name>")).Count)
